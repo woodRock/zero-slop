@@ -16,9 +16,16 @@
 
 ## Setup
 
-1.  Click on the extension icon in your Chrome toolbar.
-2.  Enter your ZeroGPT API Key in the popup.
-3.  Click **Save API Key**.
+1.  **Get an API Key:** 
+    *   Create an account at [ZeroGPT.com](https://www.zerogpt.com/login).
+    *   Navigate to your [Dashboard](https://www.zerogpt.com/dashboard).
+    *   Go to the **API** section to generate your unique API Key.
+2.  **Add Credits:** 
+    *   **Important:** The ZeroGPT Business API is a paid service. You must add a balance or subscribe to a plan in your [ZeroGPT Account](https://www.zerogpt.com/dashboard) to use this extension. Without credits, the extension will return a "Not enough credits" error.
+3.  **Configure the Extension:**
+    *   Click on the extension icon in your Chrome toolbar.
+    *   Paste your API Key into the popup.
+    *   Click **Save API Key**.
 
 ## How to Use
 
