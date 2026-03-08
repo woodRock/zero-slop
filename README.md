@@ -1,4 +1,4 @@
-# ZeroGPT Tweet Checker Chrome Extension
+# ZeroSlop: The ZeroGPT Tweet Checker Chrome Extension
 
 ![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?style=flat-square&logo=google-chrome&logoColor=white)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-brightgreen?style=flat-square)
