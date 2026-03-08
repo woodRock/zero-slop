@@ -42,7 +42,7 @@ async function performDetection(text, tabId) {
   const { zerogptApiKey } = await chrome.storage.local.get(['zerogptApiKey']);
 
   if (!zerogptApiKey) {
-    showNotification(tabId, "API Key is missing. Click the extension icon to set your key (e.g. 8645b16b-d25e-4d49-b28b-ec779f761f14).");
+    showNotification(tabId, "API Key is missing. Click the extension icon to set your key.");
     return;
   }
 

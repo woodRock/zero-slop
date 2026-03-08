@@ -13,7 +13,7 @@ This extension allows you to quickly check if a tweet's text was likely generate
 
 1.  Click on the extension icon in your Chrome toolbar.
 2.  Enter your ZeroGPT API Key in the popup.
-    *   Example API Key: `8645b16b-d25e-4d49-b28b-ec779f761f14`
+    *   Example API Key: `YOUR_API_KEY_HERE`
 3.  Click **Save API Key**.
 
 ## How to Use
