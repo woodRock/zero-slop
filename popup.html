@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ZeroGPT Setup</title>
+  <style>
+    body { font-family: sans-serif; width: 300px; padding: 15px; }
+    h2 { margin-top: 0; font-size: 1.2rem; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    input { width: 100%; padding: 8px; margin-bottom: 15px; box-sizing: border-box; }
+    button { background-color: #1d9bf0; color: white; border: none; padding: 10px 15px; border-radius: 20px; cursor: pointer; width: 100%; font-weight: bold; }
+    button:hover { background-color: #1a8cd8; }
+    .status { margin-top: 10px; font-size: 0.9rem; }
+    .success { color: green; }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+  <h2>ZeroGPT Settings</h2>
+  <label for="apiKey">API Key:</label>
+  <input type="password" id="apiKey" placeholder="8645b16b-d25e-4d49-b28b-ec779f761f14">
+  <button id="saveBtn">Save API Key</button>
+  <div id="status" class="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
