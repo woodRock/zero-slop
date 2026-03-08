@@ -43,13 +43,13 @@ function findTweetText(element) {
   if (container) {
     const tweetTextDiv = container.querySelector('[data-testid="tweetText"]');
     if (tweetTextDiv) {
-      return tweetTextDiv.innerText;
+      return tweetTextDiv.innerText || tweetTextDiv.textContent;
     }
   }
 
   // Fallback: If we can't find the article, try to find any tweet text nearby
   const nearbyText = element.closest('[data-testid="tweetText"]');
-  if (nearbyText) return nearbyText.innerText;
+  if (nearbyText) return nearbyText.innerText || nearbyText.textContent;
 
   return null;
 }
