@@ -52,3 +52,9 @@ This project uses Jest for unit testing. To run tests locally:
 ## API Note
 
 This extension uses the ZeroGPT Business API endpoint: `https://api.zerogpt.com/api/detect/detectText`. Ensure your API key is valid for this endpoint.
+
+## Support
+
+If you'd like to support the development and maintenance of ZeroSlop, you can contribute to the following Contract Address (CA). This is entirely optional and only for those who wish to support the work:
+
+`GY4453uGkG6QKbSU7YtduxhRqD4CETBaWr4qu5D3pump`

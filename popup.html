@@ -3,29 +3,78 @@
 <head>
   <title>ZeroGPT Setup</title>
   <style>
-    body { font-family: sans-serif; width: 300px; padding: 15px; }
+    body { font-family: sans-serif; width: 320px; padding: 15px; margin: 0; }
     h2 { margin-top: 0; font-size: 1.2rem; }
-    label { display: block; margin-bottom: 5px; font-weight: bold; }
-    input { width: 100%; padding: 8px; margin-bottom: 15px; box-sizing: border-box; }
-    button { background-color: #1d9bf0; color: white; border: none; padding: 10px 15px; border-radius: 20px; cursor: pointer; width: 100%; font-weight: bold; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9rem; }
+    input { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;}
+    button { background-color: #1d9bf0; color: white; border: none; padding: 8px 15px; border-radius: 20px; cursor: pointer; width: 100%; font-weight: bold; margin-bottom: 10px;}
     button:hover { background-color: #1a8cd8; }
-    .status { margin-top: 10px; font-size: 0.9rem; }
+    .status { margin-top: 5px; font-size: 0.85rem; min-height: 1.2em; }
     .success { color: green; }
     .error { color: red; }
+    .onboarding { font-size: 0.85rem; color: #555; margin-bottom: 15px; }
+    .onboarding a { color: #1d9bf0; text-decoration: none; }
+    .onboarding a:hover { text-decoration: underline; }
+    .history-container { max-height: 150px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 5px; margin-bottom: 10px; font-size: 0.85rem; }
+    .history-item { padding: 5px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;}
+    .history-item:last-child { border-bottom: none; }
+    .history-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+    .history-score { font-weight: bold; color: #1d9bf0; }
+    .tabs { display: flex; margin-bottom: 15px; border-bottom: 1px solid #ccc; }
+    .tab { flex: 1; text-align: center; padding: 5px; cursor: pointer; color: #777; font-weight: bold; font-size: 0.9rem;}
+    .tab.active { color: #1d9bf0; border-bottom: 2px solid #1d9bf0; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; font-size: 0.9rem; font-weight: bold;}
+    /* Switch */
+    .switch { position: relative; display: inline-block; width: 34px; height: 20px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
+    input:checked + .slider { background-color: #1d9bf0; }
+    input:checked + .slider:before { transform: translateX(14px); }
   </style>
 </head>
 <body>
-  <h2>ZeroGPT Settings</h2>
-  <label for="apiKey">API Key:</label>
-  <input type="password" id="apiKey" placeholder="Enter your API Key here">
-  <button id="saveBtn">Save API Key</button>
-  <div id="status" class="status"></div>
-
-  <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
-  <div id="updateSection">
-    <button id="updateBtn" style="background-color: #24292f;">Check for Updates</button>
-    <div id="updateStatus" class="status" style="margin-top: 10px;"></div>
+  <div class="tabs">
+    <div class="tab active" data-target="settings">Settings</div>
+    <div class="tab" data-target="history">History</div>
   </div>
+
+  <div id="settings" class="tab-content active">
+    <h2>Configuration</h2>
+    <div class="onboarding">
+      Don't have an API key? <a href="https://zerogpt.com" target="_blank">Get one from ZeroGPT</a>.
+    </div>
+    <label for="apiKey">API Key:</label>
+    <input type="password" id="apiKey" placeholder="Enter your API Key here">
+    <button id="saveBtn">Save API Key</button>
+    <div id="status" class="status"></div>
+
+    <div class="toggle-container">
+      <span>Auto-Scan Tweets (Uses API)</span>
+      <label class="switch">
+        <input type="checkbox" id="autoScanToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
+    <div id="updateSection">
+      <button id="updateBtn" style="background-color: #24292f;">Check for Updates</button>
+      <div id="updateStatus" class="status" style="margin-top: 5px;"></div>
+    </div>
+  </div>
+
+  <div id="history" class="tab-content">
+    <h2>Scan History</h2>
+    <div class="history-container" id="historyList">
+      <!-- History items will be inserted here -->
+    </div>
+    <button id="exportBtn" style="background-color: #17a2b8;">Export Results (CSV)</button>
+    <button id="clearHistoryBtn" style="background-color: #dc3545;">Clear History</button>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>

@@ -1,69 +1,195 @@
 let lastRightClickedElement = null;
 
-console.log("ZeroGPT Extension: Content script loaded.");
-
 // Track right-click position to find the element
 document.addEventListener('contextmenu', (event) => {
   lastRightClickedElement = event.target;
-  console.log("ZeroGPT Extension: Target element updated", lastRightClickedElement);
 }, true);
 
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log("ZeroGPT Extension: Message received", request.action);
-  
   if (request.action === "getTweetText") {
-    const tweetText = findTweetText(lastRightClickedElement);
-    console.log("ZeroGPT Extension: Extracted text:", tweetText);
-    sendResponse({ text: tweetText });
+    const { text, tweetId } = extractTweetInfo(lastRightClickedElement);
+    sendResponse({ text: text, tweetId: tweetId });
   } else if (request.action === "showLoader") {
     showOverlay("Analyzing text with ZeroGPT...");
   } else if (request.action === "showResult") {
     const data = request.data;
-    const message = `AI Generation: ${data.fakePercentage || 0}%\n` +
-                    `Status: ${data.feedback_message || "Analyzed"}\n` +
-                    `Words: ${data.textWords || 0}`;
-    showOverlay(message, "success");
+    const isAutoScan = request.isAutoScan;
+    
+    if (!isAutoScan) {
+      const message = `AI Generation: ${data.fakePercentage || 0}%\n` +
+                      `Status: ${data.feedback_message || "Analyzed"}\n` +
+                      `Words: ${data.textWords || 0}`;
+      showOverlay(message, "success");
+    }
+    
+    // Always try to inject a badge if we have a tweetId or last right-clicked context
+    injectBadge(request.tweetId || getTweetContainer(lastRightClickedElement), data.fakePercentage || 0);
   } else if (request.action === "showError") {
     showOverlay(request.message, "error");
   }
   return true; // Keep channel open for async response
 });
 
-function findTweetText(element) {
+function getTweetContainer(element) {
   if (!element) return null;
-
-  // Search upwards for the tweet container
   let container = element.closest('article');
-  if (!container) {
-    // Try to find a common parent if it's a "focus" tweet
-    container = element.closest('[data-testid="cellInnerDiv"]');
-  }
+  if (!container) container = element.closest('[data-testid="cellInnerDiv"]');
+  if (!container) container = element.closest('[data-testid="tweet"]');
+  return container;
+}
 
+function extractTweetInfo(element) {
+  const container = getTweetContainer(element);
+  let text = null;
+  
   if (container) {
     const tweetTextDiv = container.querySelector('[data-testid="tweetText"]');
     if (tweetTextDiv) {
-      return tweetTextDiv.innerText || tweetTextDiv.textContent;
+      text = tweetTextDiv.innerText || tweetTextDiv.textContent;
     }
+    // Set a unique ID for the container if it doesn't have one so we can find it later
+    if (!container.dataset.zerogptId) {
+      container.dataset.zerogptId = 'tweet-' + Math.random().toString(36).substr(2, 9);
+    }
+    return { text, tweetId: container.dataset.zerogptId };
   }
 
-  // Fallback: If we can't find the article, try to find any tweet text nearby
-  const nearbyText = element.closest('[data-testid="tweetText"]');
-  if (nearbyText) return nearbyText.innerText || nearbyText.textContent;
+  // Fallback
+  const nearbyText = element ? element.closest('[data-testid="tweetText"]') : null;
+  if (nearbyText) {
+    text = nearbyText.innerText || nearbyText.textContent;
+  }
+  return { text, tweetId: null };
+}
 
-  return null;
+function injectBadge(tweetIdOrContainer, percentage) {
+  let container;
+  if (typeof tweetIdOrContainer === 'string') {
+    container = document.querySelector(`[data-zerogpt-id="${tweetIdOrContainer}"]`);
+  } else {
+    container = tweetIdOrContainer;
+  }
+
+  if (!container) return;
+
+  // Avoid duplicate badges
+  if (container.querySelector('.zerogpt-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-badge';
+  
+  let color = '#17a2b8'; // Default info
+  if (percentage > 70) color = '#dc3545'; // High AI -> Red
+  else if (percentage < 30) color = '#28a745'; // Low AI -> Green
+  else color = '#ffc107'; // Medium AI -> Yellow
+
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    margin-left: 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: bold;
+    color: white;
+    background-color: ${color};
+    vertical-align: middle;
+    line-height: 1;
+    height: 16px;
+  `;
+  badge.innerText = `AI: ${percentage}%`;
+  badge.title = 'ZeroGPT AI Detection Score';
+
+  // Find a good place to inject. Usually next to the timestamp or username
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  } else {
+    // Fallback: prepend to tweet text
+    const textElement = container.querySelector('[data-testid="tweetText"]');
+    if (textElement && textElement.parentNode) {
+      // Create a wrapper to make it look decent
+      const wrapper = document.createElement('div');
+      wrapper.style.marginBottom = '4px';
+      wrapper.appendChild(badge);
+      textElement.parentNode.insertBefore(wrapper, textElement);
+    }
+  }
+}
+
+// Auto-scan feature: use IntersectionObserver to detect new tweets
+chrome.storage.local.get(['autoScan'], (result) => {
+  if (result.autoScan) {
+    initAutoScan();
+  }
+});
+
+// Listen for auto-scan toggle changes from popup
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local' && changes.autoScan) {
+    if (changes.autoScan.newValue) {
+      initAutoScan();
+    } else {
+      if (window.zerogptObserver) {
+        window.zerogptObserver.disconnect();
+      }
+    }
+  }
+});
+
+function initAutoScan() {
+  if (window.zerogptObserver) window.zerogptObserver.disconnect();
+  
+  window.zerogptObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const container = entry.target;
+        if (!container.dataset.zerogptScanned) {
+          container.dataset.zerogptScanned = "true";
+          const { text, tweetId } = extractTweetInfo(container);
+          if (text && text.length > 20) { // Don't scan very short tweets
+            chrome.runtime.sendMessage({
+              action: "autoScanTweet",
+              text: text,
+              tweetId: tweetId
+            });
+          }
+        }
+      }
+    });
+  }, { threshold: 0.5 });
+
+  // Observe existing tweets
+  const articles = document.querySelectorAll('article');
+  articles.forEach(el => window.zerogptObserver.observe(el));
+
+  // MutationObserver to catch newly loaded tweets
+  const mutationObserver = new MutationObserver((mutations) => {
+    mutations.forEach(mutation => {
+      mutation.addedNodes.forEach(node => {
+        if (node.nodeType === 1) { // ELEMENT_NODE
+          if (node.tagName === 'ARTICLE') {
+            window.zerogptObserver.observe(node);
+          } else {
+            const newArticles = node.querySelectorAll('article');
+            newArticles.forEach(article => window.zerogptObserver.observe(article));
+          }
+        }
+      });
+    });
+  });
+
+  mutationObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 function showOverlay(message, type = "info") {
-  console.log(`ZeroGPT Extension: Showing ${type} overlay:`, message);
-  
   const existing = document.getElementById('zerogpt-overlay');
   if (existing) existing.remove();
 
   const overlay = document.createElement('div');
   overlay.id = 'zerogpt-overlay';
   
-  // Maximize z-index to ensure it's above Twitter's layers
   overlay.style.cssText = `
     position: fixed;
     top: 60px;
@@ -80,8 +206,6 @@ function showOverlay(message, type = "info") {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     animation: zerogptSlideIn 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
     display: block !important;
-    visibility: visible !important;
-    opacity: 1 !important;
   `;
 
   const title = document.createElement('div');
@@ -124,7 +248,7 @@ function showOverlay(message, type = "info") {
   document.body.appendChild(overlay);
 
   if (type !== 'error') {
-    const timeout = type === 'success' ? 10000 : 4000;
+    const timeout = type === 'success' ? 5000 : 4000;
     setTimeout(() => {
       if (overlay.parentNode) {
         overlay.style.opacity = '0';
@@ -135,7 +259,6 @@ function showOverlay(message, type = "info") {
   }
 }
 
-// Add animation style if not exists
 if (!document.getElementById('zerogpt-styles')) {
   const style = document.createElement('style');
   style.id = 'zerogpt-styles';
