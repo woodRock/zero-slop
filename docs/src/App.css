@@ -15,6 +15,14 @@ body {
   color: var(--text-color);
   background-color: var(--bg-color);
   line-height: 1.6;
+  width: 100%;
+}
+
+.app {
+  width: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .container {
