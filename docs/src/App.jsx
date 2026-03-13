@@ -21,11 +21,25 @@ function App() {
         {media && (
           <div className="tweet-media">
             {media.type === 'video' ? (
-              <video controls autoPlay muted loop playsInline style={{ width: '100%', display: 'block' }}>
-                <source src={media.src} type="video/quicktime" />
-                <source src={media.src.replace('.mov', '.mp4')} type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
+              <div style={{ position: 'relative' }}>
+                <video 
+                  src={media.src} 
+                  controls 
+                  autoPlay 
+                  muted 
+                  loop 
+                  playsInline 
+                  preload="auto"
+                  style={{ width: '100%', display: 'block' }}
+                >
+                  Your browser does not support the video tag.
+                </video>
+                <div style={{ padding: '8px', fontSize: '0.8rem', textAlign: 'center', background: '#16181c' }}>
+                  <a href={media.src} target="_blank" rel="noopener noreferrer" style={{ color: '#1d9bf0', textDecoration: 'none' }}>
+                    Trouble viewing? Click here to open video directly
+                  </a>
+                </div>
+              </div>
             ) : (
               <img src={media.src} alt="Tweet media" />
             )}
