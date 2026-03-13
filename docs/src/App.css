@@ -106,7 +106,7 @@ header.sticky-header {
   display: flex;
   align-items: center;
   z-index: 10;
-  border-bottom: 1px solid transparent;
+  border-bottom: 1px solid var(--twitter-border);
 }
 
 header.sticky-header h2 {
@@ -139,10 +139,12 @@ header.sticky-header h2 {
   font-weight: bold;
   font-size: 1.2rem;
   color: black;
+  overflow: hidden;
 }
 
 .tweet-content {
   flex-grow: 1;
+  min-width: 0; /* Critical for wrapping text in flex containers */
 }
 
 .tweet-header {
@@ -150,15 +152,20 @@ header.sticky-header h2 {
   align-items: center;
   gap: 4px;
   margin-bottom: 2px;
+  flex-wrap: wrap;
 }
 
 .author-name {
   font-weight: bold;
   color: var(--text-white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .author-handle {
   color: var(--twitter-light-gray);
+  font-size: 0.9rem;
 }
 
 .verified-badge {
@@ -170,6 +177,7 @@ header.sticky-header h2 {
   font-size: 0.95rem;
   color: var(--text-white);
   line-height: 1.4;
+  word-wrap: break-word;
 }
 
 .tweet-body h2 {
@@ -210,6 +218,7 @@ header.sticky-header h2 {
   gap: 8px;
   cursor: pointer;
   transition: color 0.2s;
+  font-size: 0.85rem;
 }
 
 .action-item:hover {
@@ -250,7 +259,9 @@ header.sticky-header h2 {
   border-radius: 9999px;
   padding: 12px 20px;
   margin-bottom: 16px;
-  color: var(--twitter-light-gray);
+  color: var(--text-white);
+  border: none;
+  outline: none;
 }
 
 .slop-counter-box {
@@ -322,6 +333,7 @@ header.sticky-header h2 {
   justify-content: center;
   font-size: 2rem;
   margin-bottom: 12px;
+  overflow: hidden;
 }
 
 .wall-name {
@@ -342,6 +354,7 @@ header.sticky-header h2 {
   margin-top: 12px;
   font-size: 0.85rem;
   color: var(--twitter-light-gray);
+  flex-wrap: wrap;
 }
 
 .faq-container {
@@ -425,14 +438,91 @@ code {
   text-decoration: underline;
 }
 
-@media (max-width: 1200px) {
-  .sidebar-right { display: none; }
-  .app-layout { grid-template-columns: 275px 600px; width: 875px; }
+/* RESPONSIVE DESIGN */
+
+@media (max-width: 1280px) {
+  .app-layout {
+    width: 100%;
+    grid-template-columns: 275px 600px 1fr;
+  }
 }
 
-@media (max-width: 900px) {
-  .sidebar-left { width: 80px; }
-  .nav-text { display: none; }
-  .post-btn { padding: 10px; width: 50px; border-radius: 50%; }
-  .app-layout { grid-template-columns: 80px 1fr; width: 100%; }
+@media (max-width: 1100px) {
+  .sidebar-right {
+    display: none;
+  }
+  .app-layout {
+    grid-template-columns: 275px 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .sidebar-left {
+    width: 68px;
+    padding: 12px 0;
+    align-items: center;
+  }
+  .logo-container {
+    padding: 12px 0;
+  }
+  .nav-text {
+    display: none;
+  }
+  .nav-item {
+    justify-content: center;
+    width: 50px;
+    height: 50px;
+    padding: 0;
+  }
+  .post-btn {
+    width: 50px;
+    height: 50px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 0;
+  }
+  .post-btn::before {
+    content: "Z";
+    font-size: 1.2rem;
+  }
+  .app-layout {
+    grid-template-columns: 68px 1fr;
+  }
+  
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 500px) {
+  .sidebar-left {
+    display: none; /* Hide sidebar completely on very small screens */
+  }
+  .app-layout {
+    display: block;
+  }
+  .main-content {
+    border-right: none;
+  }
+  
+  /* Add a bottom navigation for mobile */
+  .mobile-nav {
+    display: flex !important;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--twitter-black);
+    border-top: 1px solid var(--twitter-border);
+    justify-content: space-around;
+    padding: 10px 0;
+    z-index: 100;
+  }
+}
+
+.mobile-nav {
+  display: none;
 }

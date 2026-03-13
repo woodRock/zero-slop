@@ -160,6 +160,14 @@ function App() {
 
   return (
     <div className="app-layout">
+      {/* Mobile Nav */}
+      <nav className="mobile-nav">
+        <a href="#" className="nav-item">🏠</a>
+        <a href="#features" className="nav-item">🚀</a>
+        <a href="#installation" className="nav-item">📥</a>
+        <a href="#privacy" className="nav-item">🛡️</a>
+      </nav>
+
       {/* Left Sidebar */}
       <aside className="sidebar-left">
         <div className="logo-container">
