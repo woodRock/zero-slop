@@ -1,8 +1,57 @@
+import { useState, useEffect } from 'react'
 import './App.css'
 
 function App() {
   const year = new Date().getFullYear();
   const baseUrl = import.meta.env.BASE_URL;
+  
+  // Firebase Config (Public values only)
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyDDx5ZbgWcgsKxsP78EubqyWRHL9yxdXec",
+    projectId: "zero-slop"
+  };
+
+  const [stats, setStats] = useState({ count: "...", accounts: "..." });
+  const [wallOfShame, setWallOfShame] = useState([]);
+
+  useEffect(() => {
+    // 1. Fetch Total Stats
+    // Note: Firestore REST doesn't have a simple 'count' endpoint without complex queries
+    // So we fetch the recent list and estimate or use a dedicated stats doc if you had one.
+    // For now, let's fetch the actual documents to get real data.
+    const fetchRegistryData = async () => {
+      try {
+        const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=100`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          const documents = data.documents || [];
+          
+          // Update Stats
+          setStats({
+            count: documents.length.toLocaleString(),
+            accounts: new Set(documents.map(d => d.fields.author_handle?.stringValue)).size.toLocaleString()
+          });
+
+          // Update Wall of Shame (Latest 3)
+          const recent = documents
+            .sort((a, b) => new Date(b.updateTime) - new Date(a.updateTime))
+            .slice(0, 3)
+            .map(doc => ({
+              name: doc.fields.author_name?.stringValue || "Unknown",
+              handle: doc.fields.author_handle?.stringValue || "@anonymous",
+              score: Math.round(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0),
+              pfp: doc.fields.author_pfp?.stringValue || "🤖"
+            }));
+          setWallOfShame(recent);
+        }
+      } catch (e) {
+        console.error("ZeroSlop: Failed to fetch live stats", e);
+      }
+    };
+
+    fetchRegistryData();
+  }, []);
 
   const Tweet = ({ author = "ZeroSlop", handle = "zeroslop_ai", children, verified = true, media = null }) => (
     <div className="tweet-card">
@@ -22,18 +71,7 @@ function App() {
           <div className="tweet-media">
             {media.type === 'video' ? (
               <div style={{ position: 'relative' }}>
-                <video 
-                  src={media.src} 
-                  controls 
-                  autoPlay 
-                  muted 
-                  loop 
-                  playsInline 
-                  preload="auto"
-                  style={{ width: '100%', display: 'block' }}
-                >
-                  Your browser does not support the video tag.
-                </video>
+                <video src={media.src} controls autoPlay muted loop playsInline preload="auto" style={{ width: '100%', display: 'block' }} />
                 <div style={{ padding: '8px', fontSize: '0.8rem', textAlign: 'center', background: '#16181c' }}>
                   <a href={media.src} target="_blank" rel="noopener noreferrer" style={{ color: '#1d9bf0', textDecoration: 'none' }}>
                     Trouble viewing? Click here to open video directly
@@ -47,7 +85,7 @@ function App() {
         )}
         <div className="tweet-actions">
           <div className="action-item"><span>💬</span> 12</div>
-          <div className="action-item) "><span>🔁</span> 45</div>
+          <div className="action-item"><span>🔁</span> 45</div>
           <div className="action-item"><span>❤️</span> 128</div>
           <div className="action-item"><span>📊</span> 12k</div>
         </div>
@@ -83,9 +121,7 @@ function App() {
           <h2>Home</h2>
         </header>
 
-        <Tweet 
-          media={{ type: 'image', src: `${baseUrl}banner.jpg` }}
-        >
+        <Tweet media={{ type: 'image', src: `${baseUrl}banner.jpg` }}>
           <h2>Welcome to ZeroSlop</h2>
           <p>Instantly detect AI-generated tweets on Twitter (X) using the ZeroGPT Business API. Stop the slop, see the truth. 🔍✨</p>
           <div className="features-grid">
@@ -100,34 +136,26 @@ function App() {
           </div>
         </Tweet>
 
-        <Tweet 
-          media={{ type: 'video', src: `${baseUrl}zero-slop-usage-video.mov` }}
-        >
+        <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-usage-video.mov` }}>
           <p>Check out ZeroSlop in action! Seamlessly integrated into your X timeline. 👇</p>
         </Tweet>
 
         <section id="how-it-works">
-          <Tweet
-            media={{ type: 'image', src: `${baseUrl}architecture-diagram.jpeg` }}
-          >
+          <Tweet media={{ type: 'image', src: `${baseUrl}architecture-diagram.jpeg` }}>
             <h2>How it Works</h2>
             <p>ZeroSlop combines cutting-edge AI detection with community-driven reporting. When you scan a tweet, our engine analyzes it and saves the result to a shared registry for everyone to see. 🧠⚡</p>
           </Tweet>
         </section>
 
         <section id="registry">
-          <Tweet
-            media={{ type: 'video', src: `${baseUrl}zero-slop-self-reporting.mov` }}
-          >
+          <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-self-reporting.mov` }}>
             <h2>Community Registry</h2>
             <p>ZeroSlop is powered by the community. When one user scans a tweet, the result is saved for everyone. Watch how it identifies slop in real-time on a busy thread! 🛡️🤝</p>
           </Tweet>
         </section>
 
         <section id="wanted">
-          <Tweet
-            media={{ type: 'video', src: `${baseUrl}zero-slop-wanted-posters.mov` }}
-          >
+          <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-wanted-posters.mov` }}>
             <h2>Wanted Posters</h2>
             <p>Expose the slop-posters with style! Generate a custom "WANTED" poster for any AI-detected tweet and share it instantly to your clipboard. 🖼️🎨</p>
           </Tweet>
@@ -136,34 +164,25 @@ function App() {
         <section id="wall-of-shame">
           <div className="wall-title">Recent Detections (Wall of Shame)</div>
           <div className="wall-grid">
-            <div className="wall-item">
-              <div className="wall-pfp">🤖</div>
-              <div className="wall-info">
-                <div className="wall-name">AI Bot #1</div>
-                <div className="wall-score">98% AI</div>
+            {wallOfShame.length > 0 ? wallOfShame.map((slop, i) => (
+              <div key={i} className="wall-item">
+                <div className="wall-pfp">
+                  {slop.pfp.startsWith('http') ? <img src={slop.pfp} alt="pfp" style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : slop.pfp}
+                </div>
+                <div className="wall-info">
+                  <div className="wall-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>{slop.name}</div>
+                  <div className="wall-handle" style={{ color: '#71767b', fontSize: '0.75rem' }}>{slop.handle}</div>
+                  <div className="wall-score">{slop.score}% AI</div>
+                </div>
               </div>
-            </div>
-            <div className="wall-item">
-              <div className="wall-pfp">🤖</div>
-              <div className="wall-info">
-                <div className="wall-name">Engagement Farmer</div>
-                <div className="wall-score">85% AI</div>
-              </div>
-            </div>
-            <div className="wall-item">
-              <div className="wall-pfp">🤖</div>
-              <div className="wall-info">
-                <div className="wall-name">Slop Merchant</div>
-                <div className="wall-score">92% AI</div>
-              </div>
-            </div>
+            )) : (
+              <div style={{ padding: '20px', color: '#71767b', textAlign: 'center', width: '100%' }}>Loading slop reports...</div>
+            )}
           </div>
         </section>
 
         <section id="features">
-          <Tweet
-            media={{ type: 'image', src: `${baseUrl}zero-slop-right-click.png` }}
-          >
+          <Tweet media={{ type: 'image', src: `${baseUrl}zero-slop-right-click.png` }}>
             <h2>Native Integration</h2>
             <p>The timeline is being flooded with AI-generated slop. Our extension integrates natively into X to help you identify bot-like behavior instantly.</p>
             <div className="browser-icons">
@@ -176,28 +195,23 @@ function App() {
         </section>
 
         <section id="installation">
-          <Tweet
-            media={{ type: 'image', src: `${baseUrl}installation-guide.jpeg` }}
-          >
+          <Tweet media={{ type: 'image', src: `${baseUrl}installation-guide.jpeg` }}>
             <h2>Installation Guide</h2>
             <p>Choose your preferred way to install ZeroSlop:</p>
-            
             <div style={{ marginBottom: '20px' }}>
               <h3>Option 1: Direct Download (Easiest)</h3>
               <p>1. <a href="https://github.com/woodrock/zero-slop/raw/main/zero-slop-extension.zip" className="btn-inline" style={{ fontWeight: 'bold' }}>Download zero-slop-extension.zip</a></p>
               <p>2. Extract the ZIP file to a folder on your computer.</p>
             </div>
-
             <div style={{ marginBottom: '20px' }}>
               <h3>Option 2: Developers (Git)</h3>
-              <p>1. Clone the repo: <code>git clone https://github.com/woodrock/zero-slop.git</code></p>
+              <p>1. Clone: <code>git clone https://github.com/woodrock/zero-slop.git</code></p>
             </div>
-
             <div style={{ borderTop: '1px solid #2f3336', paddingTop: '15px' }}>
-              <h3>Final Steps (All users)</h3>
-              <p>1. Open <code>chrome://extensions/</code> in your browser.</p>
-              <p>2. Enable <strong>Developer mode</strong> (top right toggle).</p>
-              <p>3. Click <strong>Load unpacked</strong> and select the <code>zero-slop</code> folder you just extracted/cloned.</p>
+              <h3>Final Steps</h3>
+              <p>1. Open <code>chrome://extensions/</code></p>
+              <p>2. Enable <strong>Developer mode</strong></p>
+              <p>3. Click <strong>Load unpacked</strong> and select the <code>zero-slop</code> folder.</p>
             </div>
           </Tweet>
         </section>
@@ -211,11 +225,11 @@ function App() {
             </div>
             <div className="faq-item">
               <h3>Is it 100% accurate?</h3>
-              <p>AI detection is probabilistic. A high score means the text has strong markers of being AI-generated, while a low score suggests human writing. Always use your best judgment!</p>
+              <p>AI detection is probabilistic. A high score means the text has strong markers of being AI-generated, while a low score suggests human writing.</p>
             </div>
             <div className="faq-item">
               <h3>What happens when I report a tweet?</h3>
-              <p>Reporting a tweet adds its ID and metadata to our community registry. This allows other users to see the AI score instantly without performing a new scan.</p>
+              <p>Reporting a tweet adds its ID and metadata to our community registry. This allows other users to see the AI score instantly.</p>
             </div>
           </div>
         </section>
@@ -239,8 +253,8 @@ function App() {
         
         <div className="slop-counter-box">
           <div className="counter-label">TOTAL SLOP DETECTED</div>
-          <div className="counter-value">124,892</div>
-          <div className="counter-sub">Across 15,204 accounts</div>
+          <div className="counter-value">{stats.count}</div>
+          <div className="counter-sub">Across {stats.accounts} accounts</div>
         </div>
 
         <div className="trending-box">
@@ -248,7 +262,7 @@ function App() {
           <div className="trending-item">
             <div className="trending-category">Trending in Tech</div>
             <div className="trending-name">#ZeroSlop</div>
-            <div className="trending-count">1.2k Scans today</div>
+            <div className="trending-count">Live Community Data</div>
           </div>
           <div className="trending-item">
             <div className="trending-category">API Status</div>
@@ -269,14 +283,8 @@ function App() {
                 alert('Address copied to clipboard!');
               }}
               style={{
-                background: 'var(--twitter-blue)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '9999px',
-                padding: '4px 12px',
-                fontSize: '0.8rem',
-                fontWeight: 'bold',
-                cursor: 'pointer'
+                background: 'var(--twitter-blue)', color: 'white', border: 'none', borderRadius: '9999px',
+                padding: '4px 12px', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer'
               }}
             >
               Copy Address
