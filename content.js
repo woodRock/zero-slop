@@ -5,6 +5,9 @@ document.addEventListener('contextmenu', (event) => {
   lastRightClickedElement = event.target;
 }, true);
 
+// Global to store the last detection result for the current tweet/profile
+let currentOverlayInfo = null;
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "getTweetText") {
@@ -22,7 +25,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const data = request.data;
     const isAutoScan = request.isAutoScan;
     
+    // Store info for buttons
     if (!isAutoScan) {
+      const activeElement = lastRightClickedElement;
+      if (data.feedback_message?.includes("Thread Analysis")) {
+        currentOverlayInfo = extractThreadInfo(activeElement);
+      } else if (!request.tweetId) {
+        currentOverlayInfo = extractProfileInfo(activeElement);
+      } else {
+        currentOverlayInfo = extractTweetInfo(activeElement);
+      }
+      
       const message = `AI Generation: ${data.fakePercentage || 0}%\n` +
                       `Status: ${data.feedback_message || "Analyzed"}\n` +
                       `Words: ${data.textWords || 0}`;
@@ -423,7 +436,8 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
     btnContainer.style.gap = '8px';
     btnContainer.style.marginTop = '15px';
 
-    const info = extractTweetInfo(lastRightClickedElement);
+    // Use the stored info from the global, or fallback to current extraction
+    const info = currentOverlayInfo || extractTweetInfo(lastRightClickedElement);
 
     if (!message.includes('Reported')) {
       const reportBtn = document.createElement('button');
@@ -440,10 +454,10 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
         font-size: 0.9rem;
       `;
       reportBtn.onclick = () => {
-        chrome.runtime.sendMessage({ 
-          action: "manualReport", 
+        chrome.runtime.sendMessage({
+          action: "manualReport",
           aiScore: currentAiScore,
-          ...info 
+          ...info
         });
         reportBtn.innerText = '✅ Reported to Registry';
         reportBtn.style.background = '#00ba7c';
@@ -471,8 +485,7 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
         posterBtn.innerText = '📋 Copied to Clipboard!';
         setTimeout(() => posterBtn.innerText = '🖼️ Generate Wanted Poster', 3000);
       });
-    };
-    btnContainer.appendChild(posterBtn);
+    };    btnContainer.appendChild(posterBtn);
     overlay.appendChild(btnContainer);
   }
 
