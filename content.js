@@ -13,6 +13,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "getThreadText") {
     const info = extractThreadInfo(lastRightClickedElement);
     sendResponse(info);
+  } else if (request.action === "getProfileText") {
+    const info = extractProfileInfo(lastRightClickedElement);
+    sendResponse(info);
   } else if (request.action === "showLoader") {
     showOverlay("Analyzing text with ZeroGPT...");
   } else if (request.action === "showResult") {
@@ -125,6 +128,50 @@ function extractThreadInfo(element) {
     text: combinedText.trim(),
     isThread: true,
     tweetCount: count
+  };
+}
+
+/**
+ * Specifically finds all visible tweets on a profile page or by an author
+ */
+function extractProfileInfo(element) {
+  const currentTweetInfo = extractTweetInfo(element);
+  let targetHandle = currentTweetInfo.author?.handle;
+
+  // If we are on a profile page but didn't click a tweet, try to get handle from URL
+  if (!targetHandle) {
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts.length >= 2 && !['home', 'explore', 'notifications', 'messages'].includes(pathParts[1])) {
+      targetHandle = '@' + pathParts[1];
+    }
+  }
+
+  if (!targetHandle) return currentTweetInfo;
+
+  const articles = document.querySelectorAll('article');
+  let combinedText = "";
+  let count = 0;
+
+  articles.forEach(article => {
+    const userNameDiv = article.querySelector('[data-testid="User-Name"]');
+    if (userNameDiv) {
+      const handleLink = Array.from(userNameDiv.querySelectorAll('a')).find(a => a.innerText.toLowerCase() === targetHandle.toLowerCase());
+      if (handleLink) {
+        const textDiv = article.querySelector('[data-testid="tweetText"]');
+        if (textDiv) {
+          combinedText += (textDiv.innerText || textDiv.textContent) + "\n\n";
+          count++;
+        }
+      }
+    }
+  });
+
+  return {
+    ...currentTweetInfo,
+    text: combinedText.trim(),
+    isThread: true,
+    tweetCount: count,
+    author: { ...currentTweetInfo.author, handle: targetHandle }
   };
 }
 

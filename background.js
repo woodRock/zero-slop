@@ -23,11 +23,19 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["all"]
     });
 
-    // Sub-item: Check Thread / Profile
+    // Sub-item: Check Thread
     chrome.contextMenus.create({
       id: "checkThread",
       parentId: "zeroSlopParent",
-      title: "🧵 Scan Full Thread / Profile",
+      title: "🧵 Scan This Thread",
+      contexts: ["all"]
+    });
+
+    // Sub-item: Check Profile
+    chrome.contextMenus.create({
+      id: "checkProfile",
+      parentId: "zeroSlopParent",
+      title: "👤 Scan User Profile",
       contexts: ["all"]
     });
 
@@ -60,6 +68,12 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     chrome.tabs.sendMessage(tab.id, { action: "getThreadText" }, (response) => {
       if (response && response.text) {
         performDetection(response.text, tab.id, response.tweetId, false, response.author, true);
+      }
+    });
+  } else if (info.menuItemId === "checkProfile") {
+    chrome.tabs.sendMessage(tab.id, { action: "getProfileText" }, (response) => {
+      if (response && response.text) {
+        performDetection(response.text, tab.id, null, false, response.author, true);
       }
     });
   } else if (info.menuItemId === "reportSlop") {
