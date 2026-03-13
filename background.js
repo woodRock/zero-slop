@@ -222,7 +222,7 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
         const percentage = result.data.fakePercentage || 0;
         saveToHistory(text, percentage, result.data.textWords);
         
-        if (percentage > 70) {
+        if (percentage > 15) {
           incrementSlopsCaught();
         }
 
@@ -258,7 +258,7 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
 
   if (percentage > 0) {
     fields.ai_score = { doubleValue: parseFloat(percentage) };
-    if (percentage > 70) {
+    if (percentage > 15) {
       incrementSlopsCaught();
     }
   } else if (isManual) {
