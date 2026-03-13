@@ -7,6 +7,7 @@ const FIREBASE_CONFIG = {
 // Initialize context menu
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
+    // Parent Menu
     chrome.contextMenus.create({
       id: "zeroSlopParent",
       title: "ZeroSlop",
@@ -14,6 +15,7 @@ chrome.runtime.onInstalled.addListener(() => {
       documentUrlPatterns: ["*://*.twitter.com/*", "*://*.x.com/*"]
     });
 
+    // Sub-item: Check Single
     chrome.contextMenus.create({
       id: "checkZeroGPT",
       parentId: "zeroSlopParent",
@@ -21,6 +23,15 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["all"]
     });
 
+    // Sub-item: Check Thread
+    chrome.contextMenus.create({
+      id: "checkThread",
+      parentId: "zeroSlopParent",
+      title: "🧵 Check Full Thread",
+      contexts: ["all"]
+    });
+
+    // Sub-item: Report
     chrome.contextMenus.create({
       id: "reportSlop",
       parentId: "zeroSlopParent",
@@ -45,11 +56,15 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         }
       });
     }
+  } else if (info.menuItemId === "checkThread") {
+    chrome.tabs.sendMessage(tab.id, { action: "getThreadText" }, (response) => {
+      if (response && response.text) {
+        performDetection(response.text, tab.id, response.tweetId, false, response.author, true);
+      }
+    });
   } else if (info.menuItemId === "reportSlop") {
     chrome.tabs.sendMessage(tab.id, { action: "getTweetText" }, (response) => {
       if (response && response.tweetId) {
-        // For a manual report from context menu, we don't have a fresh score yet
-        // So we just report it to the registry
         storeSlopTweet(response.tweetId, response.text, 0, response.author, true);
         chrome.tabs.sendMessage(tab.id, { 
           action: "showResult", 
@@ -70,7 +85,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     });
   } else if (request.action === "manualReport") {
-    // If we have a fresh score from the overlay, use it!
     const score = request.aiScore || 0;
     storeSlopTweet(request.tweetId, request.text, score, request.author, true);
   } else if (request.action === "checkRegistry") {
@@ -103,7 +117,7 @@ async function checkRegistry(tweetId) {
   return null;
 }
 
-async function performDetection(text, tabId, tweetId = null, isAutoScan = false, author = null) {
+async function performDetection(text, tabId, tweetId = null, isAutoScan = false, author = null, isThread = false) {
   const { zerogptApiKey } = await chrome.storage.local.get(['zerogptApiKey']);
   if (!zerogptApiKey) return;
 
@@ -122,14 +136,16 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
         const percentage = result.data.fakePercentage || 0;
         saveToHistory(text, percentage, result.data.textWords);
         
-        // Save detection score to the registry
         if (tweetId) {
           storeSlopTweet(tweetId, text, percentage, author, false);
         }
 
         chrome.tabs.sendMessage(tabId, {
           action: "showResult",
-          data: result.data,
+          data: { 
+            ...result.data, 
+            feedback_message: isThread ? `Thread Analysis: ${result.data.feedback_message || "Analyzed"}` : result.data.feedback_message
+          },
           tweetId: tweetId,
           isAutoScan: isAutoScan
         });
@@ -143,7 +159,6 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
 async function storeSlopTweet(tweetId, text, percentage, author, isManual = false) {
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
   
-  // Create fields object
   const fields = {
     tweet_id: { stringValue: tweetId },
     text: { stringValue: text?.substring(0, 1000) || "" },
@@ -151,8 +166,6 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     last_updated: { timestampValue: new Date().toISOString() }
   };
 
-  // ONLY update the AI score if it's NOT a manual report (which might have 0)
-  // OR if we actually have a real score. This prevents overwriting 27% with 0%
   if (percentage > 0) {
     fields.ai_score = { doubleValue: parseFloat(percentage) };
   }
@@ -164,7 +177,6 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     if (author.pfp) fields.author_pfp = { stringValue: author.pfp };
   }
 
-  // Define mask to ONLY update specified fields (don't overwrite AI score if it's not in fields)
   let maskParams = "";
   Object.keys(fields).forEach(key => {
     maskParams += `&updateMask.fieldPaths=${key}`;
@@ -176,15 +188,8 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields })
     });
-
-    if (response.ok) {
-      console.log(`ZeroSlop: ${isManual ? 'Manual report' : 'Auto detection'} for ${tweetId} saved.`);
-    } else {
-      const errorText = await response.text();
-      console.error("ZeroSlop: Firestore REST Error:", errorText);
-    }
   } catch (e) {
-    console.error("ZeroSlop: Network error saving to Firestore:", e);
+    console.error("ZeroSlop: Firestore error:", e);
   }
 }
 

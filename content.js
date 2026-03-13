@@ -5,13 +5,13 @@ document.addEventListener('contextmenu', (event) => {
   lastRightClickedElement = event.target;
 }, true);
 
-// Global to store the last detection result for the current tweet
-let lastDetectionResult = null;
-
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "getTweetText") {
     const info = extractTweetInfo(lastRightClickedElement);
+    sendResponse(info);
+  } else if (request.action === "getThreadText") {
+    const info = extractThreadInfo(lastRightClickedElement);
     sendResponse(info);
   } else if (request.action === "showLoader") {
     showOverlay("Analyzing text with ZeroGPT...");
@@ -26,12 +26,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       showOverlay(message, "success", data.fakePercentage);
     }
     
-    // Always try to inject a badge if we have a tweetId or last right-clicked context
     injectBadge(request.tweetId || getTweetContainer(lastRightClickedElement), data.fakePercentage || 0);
   } else if (request.action === "showError") {
     showOverlay(request.message, "error");
   }
-  return true; // Keep channel open for async response
+  return true; 
 });
 
 function getTweetContainer(element) {
@@ -95,6 +94,40 @@ function extractTweetInfo(element) {
   return { text, tweetId: null, author: null };
 }
 
+/**
+ * Finds all visible tweets by the same author and combines their text
+ */
+function extractThreadInfo(element) {
+  const currentTweetInfo = extractTweetInfo(element);
+  if (!currentTweetInfo.author?.handle) return currentTweetInfo;
+
+  const targetHandle = currentTweetInfo.author.handle;
+  const articles = document.querySelectorAll('article');
+  let combinedText = "";
+  let count = 0;
+
+  articles.forEach(article => {
+    const userNameDiv = article.querySelector('[data-testid="User-Name"]');
+    if (userNameDiv) {
+      const handleLink = Array.from(userNameDiv.querySelectorAll('a')).find(a => a.innerText === targetHandle);
+      if (handleLink) {
+        const textDiv = article.querySelector('[data-testid="tweetText"]');
+        if (textDiv) {
+          combinedText += (textDiv.innerText || textDiv.textContent) + "\n\n";
+          count++;
+        }
+      }
+    }
+  });
+
+  return {
+    ...currentTweetInfo,
+    text: combinedText.trim(),
+    isThread: true,
+    tweetCount: count
+  };
+}
+
 function injectBadge(tweetIdOrContainer, percentage) {
   let container;
   if (typeof tweetIdOrContainer === 'string') {
@@ -110,9 +143,9 @@ function injectBadge(tweetIdOrContainer, percentage) {
   badge.className = 'zerogpt-badge';
   
   let color = '#17a2b8';
-  if (percentage > 70) color = '#f4212e'; // Twitter Red
-  else if (percentage < 30) color = '#00ba7c'; // Twitter Green
-  else color = '#ffd700'; // Yellow
+  if (percentage > 70) color = '#f4212e';
+  else if (percentage < 30) color = '#00ba7c';
+  else color = '#ffd700';
 
   badge.style.cssText = `
     display: inline-flex;
@@ -139,7 +172,6 @@ function injectBadge(tweetIdOrContainer, percentage) {
   }
 }
 
-// Registry Check & Auto-Scan
 function initObservers() {
   if (window.zerogptObserver) window.zerogptObserver.disconnect();
   
@@ -150,10 +182,8 @@ function initObservers() {
         if (!container.dataset.zerogptChecked) {
           container.dataset.zerogptChecked = "true";
           const info = extractTweetInfo(container);
-          
           if (info.tweetId && !info.tweetId.startsWith('local-')) {
             chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
-            
             chrome.storage.local.get(['autoScan'], (result) => {
               if (result.autoScan) {
                 chrome.runtime.sendMessage({ action: "autoScanTweet", ...info });
@@ -186,7 +216,6 @@ function initObservers() {
   mutationObserver.observe(document.body, { childList: true, subtree: true });
 }
 
-// Start observing
 initObservers();
 
 async function generateWantedPoster(author, percentage) {
@@ -195,16 +224,13 @@ async function generateWantedPoster(author, percentage) {
   canvas.width = 600;
   canvas.height = 800;
 
-  // 1. Background (Parchment color)
   ctx.fillStyle = '#f4e4bc';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   
-  // 2. Borders
   ctx.strokeStyle = '#5d4037';
   ctx.lineWidth = 20;
   ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
 
-  // 3. Header
   ctx.fillStyle = '#5d4037';
   ctx.font = 'bold 80px "Courier New", Courier, monospace';
   ctx.textAlign = 'center';
@@ -213,54 +239,43 @@ async function generateWantedPoster(author, percentage) {
   ctx.font = 'bold 30px "Courier New", Courier, monospace';
   ctx.fillText('FOR SPREADING AI SLOP', canvas.width / 2, 160);
 
-  // 4. Profile Picture
   if (author.pfp) {
     try {
       const img = new Image();
-      img.crossOrigin = "anonymous"; // Try to handle CORS
+      img.crossOrigin = "anonymous";
       img.src = author.pfp;
-      await new Promise((resolve, reject) => {
+      await new Promise((resolve) => {
         img.onload = resolve;
-        img.onerror = resolve; // Continue even if image fails
+        img.onerror = resolve;
       });
-      
-      // Draw a frame for the PFP
       ctx.fillStyle = '#d7ccc8';
       ctx.fillRect(150, 200, 300, 300);
       ctx.drawImage(img, 150, 200, 300, 300);
       ctx.strokeStyle = '#5d4037';
       ctx.lineWidth = 5;
       ctx.strokeRect(150, 200, 300, 300);
-    } catch (e) {
-      console.error("ZeroSlop: Failed to draw PFP on poster", e);
-    }
+    } catch (e) {}
   }
 
-  // 5. Author Name
   ctx.fillStyle = '#5d4037';
   ctx.font = 'bold 40px "Courier New", Courier, monospace';
   ctx.fillText(author.name || 'Unknown Slop-Poster', canvas.width / 2, 560);
   ctx.font = 'italic 30px "Courier New", Courier, monospace';
   ctx.fillText(author.handle || '@anonymous', canvas.width / 2, 610);
 
-  // 6. The Stamp (Big Red AI SLOP)
   ctx.save();
   ctx.translate(canvas.width / 2, 400);
   ctx.rotate(-0.3);
-  
   ctx.strokeStyle = 'rgba(244, 33, 46, 0.8)';
   ctx.lineWidth = 15;
   ctx.strokeRect(-250, -60, 500, 120);
-  
   ctx.fillStyle = 'rgba(244, 33, 46, 0.8)';
   ctx.font = 'bold 70px Arial';
   ctx.fillText('AI SLOP', 0, 15);
-  
   ctx.font = 'bold 30px Arial';
   ctx.fillText(`DETECTED: ${percentage}%`, 0, 45);
   ctx.restore();
 
-  // 7. Footer Branding
   ctx.fillStyle = '#5d4037';
   ctx.font = 'bold 20px Arial';
   ctx.fillText('stamped by github.com/woodrock/zero-slop', canvas.width / 2, 750);
@@ -324,7 +339,6 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
 
     const info = extractTweetInfo(lastRightClickedElement);
 
-    // 1. Report Button
     if (!message.includes('Reported')) {
       const reportBtn = document.createElement('button');
       reportBtn.innerText = '🚩 Report as AI Slop';
@@ -352,7 +366,6 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
       btnContainer.appendChild(reportBtn);
     }
 
-    // 2. Poster Button
     const posterBtn = document.createElement('button');
     posterBtn.innerText = '🖼️ Generate Wanted Poster';
     posterBtn.style.cssText = `
