@@ -8,21 +8,33 @@ const db = getFirestore(app);
 
 // Initialize context menu
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: "checkZeroGPT",
-    title: "Check with ZeroGPT",
-    contexts: ["selection", "page", "link"],
-    documentUrlPatterns: ["*://*.twitter.com/*", "*://*.x.com/*"]
-  });
+  chrome.contextMenus.removeAll(() => {
+    // Parent Menu
+    chrome.contextMenus.create({
+      id: "zeroSlopParent",
+      title: "ZeroSlop",
+      contexts: ["all"],
+      documentUrlPatterns: ["*://*.twitter.com/*", "*://*.x.com/*"]
+    });
 
-  chrome.contextMenus.create({
-    id: "reportSlop",
-    title: "🚩 Report as AI Slop",
-    contexts: ["all"],
-    documentUrlPatterns: ["*://*.twitter.com/*", "*://*.x.com/*"]
-  });
+    // Sub-item: Check
+    chrome.contextMenus.create({
+      id: "checkZeroGPT",
+      parentId: "zeroSlopParent",
+      title: "Check with ZeroGPT",
+      contexts: ["all"]
+    });
 
-  console.log("ZeroSlop: Context menus created.");
+    // Sub-item: Report
+    chrome.contextMenus.create({
+      id: "reportSlop",
+      parentId: "zeroSlopParent",
+      title: "🚩 Report as AI Slop",
+      contexts: ["all"]
+    });
+
+    console.log("ZeroSlop: Hierarchical context menus created.");
+  });
 });
 
 // Handle context menu click
