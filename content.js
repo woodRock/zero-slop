@@ -5,6 +5,9 @@ document.addEventListener('contextmenu', (event) => {
   lastRightClickedElement = event.target;
 }, true);
 
+// Global to store the last detection result for the current tweet
+let lastDetectionResult = null;
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "getTweetText") {
@@ -20,7 +23,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const message = `AI Generation: ${data.fakePercentage || 0}%\n` +
                       `Status: ${data.feedback_message || "Analyzed"}\n` +
                       `Words: ${data.textWords || 0}`;
-      showOverlay(message, "success");
+      showOverlay(message, "success", data.fakePercentage);
     }
     
     // Always try to inject a badge if we have a tweetId or last right-clicked context
@@ -149,11 +152,8 @@ function initObservers() {
           const info = extractTweetInfo(container);
           
           if (info.tweetId && !info.tweetId.startsWith('local-')) {
-            // 1. Always check the registry first (SponsorBlock style)
             chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
             
-            // 2. If autoScan is ON, perform a fresh detection ONLY IF the registry check fails 
-            // (handled in background.js or by simply running both)
             chrome.storage.local.get(['autoScan'], (result) => {
               if (result.autoScan) {
                 chrome.runtime.sendMessage({ action: "autoScanTweet", ...info });
@@ -189,7 +189,7 @@ function initObservers() {
 // Start observing
 initObservers();
 
-function showOverlay(message, type = "info") {
+function showOverlay(message, type = "info", currentAiScore = 0) {
   const existing = document.getElementById('zerogpt-overlay');
   if (existing) existing.remove();
 
@@ -245,7 +245,11 @@ function showOverlay(message, type = "info") {
     `;
     reportBtn.onclick = () => {
       const info = extractTweetInfo(lastRightClickedElement);
-      chrome.runtime.sendMessage({ action: "manualReport", ...info });
+      chrome.runtime.sendMessage({ 
+        action: "manualReport", 
+        aiScore: currentAiScore,
+        ...info 
+      });
       reportBtn.innerText = '✅ Reported to Registry';
       reportBtn.style.background = '#00ba7c';
       reportBtn.disabled = true;

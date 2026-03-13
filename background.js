@@ -48,6 +48,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   } else if (info.menuItemId === "reportSlop") {
     chrome.tabs.sendMessage(tab.id, { action: "getTweetText" }, (response) => {
       if (response && response.tweetId) {
+        // For a manual report from context menu, we don't have a fresh score yet
+        // So we just report it to the registry
         storeSlopTweet(response.tweetId, response.text, 0, response.author, true);
         chrome.tabs.sendMessage(tab.id, { 
           action: "showResult", 
@@ -68,7 +70,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     });
   } else if (request.action === "manualReport") {
-    storeSlopTweet(request.tweetId, request.text, 0, request.author, true);
+    // If we have a fresh score from the overlay, use it!
+    const score = request.aiScore || 0;
+    storeSlopTweet(request.tweetId, request.text, score, request.author, true);
   } else if (request.action === "checkRegistry") {
     checkRegistry(request.tweetId).then(data => {
       if (data) {
@@ -117,9 +121,12 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
       if (result.success) {
         const percentage = result.data.fakePercentage || 0;
         saveToHistory(text, percentage, result.data.textWords);
-        if (percentage > 70 && tweetId) {
+        
+        // Save detection score to the registry
+        if (tweetId) {
           storeSlopTweet(tweetId, text, percentage, author, false);
         }
+
         chrome.tabs.sendMessage(tabId, {
           action: "showResult",
           data: result.data,
@@ -134,16 +141,21 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
 }
 
 async function storeSlopTweet(tweetId, text, percentage, author, isManual = false) {
-  // Use the standard 'patch' method for a single document to ensure it creates if missing
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
   
+  // Create fields object
   const fields = {
     tweet_id: { stringValue: tweetId },
     text: { stringValue: text?.substring(0, 1000) || "" },
-    ai_score: { doubleValue: parseFloat(percentage) || 0.0 },
     status: { stringValue: "pending" },
     last_updated: { timestampValue: new Date().toISOString() }
   };
+
+  // ONLY update the AI score if it's NOT a manual report (which might have 0)
+  // OR if we actually have a real score. This prevents overwriting 27% with 0%
+  if (percentage > 0) {
+    fields.ai_score = { doubleValue: parseFloat(percentage) };
+  }
 
   if (isManual) fields.manual_report = { booleanValue: true };
   if (author) {
@@ -152,8 +164,14 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     if (author.pfp) fields.author_pfp = { stringValue: author.pfp };
   }
 
+  // Define mask to ONLY update specified fields (don't overwrite AI score if it's not in fields)
+  let maskParams = "";
+  Object.keys(fields).forEach(key => {
+    maskParams += `&updateMask.fieldPaths=${key}`;
+  });
+
   try {
-    const response = await fetch(url, {
+    const response = await fetch(url + maskParams, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields })
