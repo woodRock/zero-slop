@@ -26,8 +26,8 @@ function App() {
         const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
         const statsResponse = await fetch(statsUrl);
         
-        // 2. Fetch Recent Documents for Wall of Shame & Search
-        const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=100`;
+        // 2. Fetch Recent Documents for Wall of Shame & Search (Sorted by update time)
+        const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=100&orderBy=last_updated desc&t=${Date.now()}`;
         const response = await fetch(url);
         
         if (response.ok) {
