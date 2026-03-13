@@ -1,3 +1,11 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import { getFirestore, doc, setDoc, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import firebaseConfig from "./firebase-config.js";
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 // Initialize context menu
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
@@ -24,7 +32,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           return;
         }
         if (response && response.text) {
-          performDetection(response.text, tab.id, response.tweetId);
+          performDetection(response.text, tab.id, response.tweetId, false, response.author);
         } else {
           showNotification(tab.id, "Could not find tweet text. Try selecting/highlighting the text manually and right-clicking again.");
         }
@@ -38,13 +46,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "autoScanTweet") {
     chrome.storage.local.get(['autoScan'], (result) => {
       if (result.autoScan) {
-        performDetection(request.text, sender.tab.id, request.tweetId, true);
+        performDetection(request.text, sender.tab.id, request.tweetId, true, request.author);
       }
     });
   }
 });
 
-async function performDetection(text, tabId, tweetId = null, isAutoScan = false) {
+async function performDetection(text, tabId, tweetId = null, isAutoScan = false, author = null) {
   const { zerogptApiKey } = await chrome.storage.local.get(['zerogptApiKey']);
 
   if (!zerogptApiKey) {
@@ -74,9 +82,16 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false)
     const result = await response.json();
     
     if (result.success) {
-      // Save history
-      saveToHistory(text, result.data.fakePercentage, result.data.textWords);
+      const percentage = result.data.fakePercentage || 0;
       
+      // Save history
+      saveToHistory(text, percentage, result.data.textWords);
+      
+      // Store in Firestore if it's "Slop" (e.g., > 70% AI)
+      if (percentage > 70 && tweetId) {
+        storeSlopTweet(tweetId, text, percentage, author);
+      }
+
       chrome.tabs.sendMessage(tabId, {
         action: "showResult",
         data: result.data,
@@ -89,6 +104,36 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false)
   } catch (error) {
     console.error("ZeroGPT Extension: Fetch error:", error);
     if (!isAutoScan) showNotification(tabId, "Connection error. Please check your internet and API key validity.");
+  }
+}
+
+async function storeSlopTweet(tweetId, text, percentage, author) {
+  try {
+    const tweetRef = doc(db, "slop_registry", tweetId);
+    
+    const slopData = {
+      tweet_id: tweetId,
+      text: text.substring(0, 1000), // More room for slop
+      ai_score: percentage,
+      report_count: increment(1),
+      status: "pending",
+      last_updated: serverTimestamp(),
+      created_at: serverTimestamp()
+    };
+
+    if (author) {
+      slopData.author_info = {
+        name: author.name,
+        handle: author.handle,
+        pfp_url: author.pfp
+      };
+    }
+    
+    await setDoc(tweetRef, slopData, { merge: true });
+
+    console.log(`ZeroSlop: Tweet ${tweetId} from ${author?.handle || 'unknown'} reported to registry.`);
+  } catch (e) {
+    console.error("ZeroSlop: Error adding slop report to Firestore:", e);
   }
 }
 

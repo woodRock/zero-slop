@@ -8,8 +8,8 @@ document.addEventListener('contextmenu', (event) => {
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "getTweetText") {
-    const { text, tweetId } = extractTweetInfo(lastRightClickedElement);
-    sendResponse({ text: text, tweetId: tweetId });
+    const info = extractTweetInfo(lastRightClickedElement);
+    sendResponse(info);
   } else if (request.action === "showLoader") {
     showOverlay("Analyzing text with ZeroGPT...");
   } else if (request.action === "showResult") {
@@ -42,31 +42,67 @@ function getTweetContainer(element) {
 function extractTweetInfo(element) {
   const container = getTweetContainer(element);
   let text = null;
+  let tweetId = null;
+  let author = { name: null, handle: null, pfp: null };
   
   if (container) {
+    // 1. Get Text
     const tweetTextDiv = container.querySelector('[data-testid="tweetText"]');
     if (tweetTextDiv) {
       text = tweetTextDiv.innerText || tweetTextDiv.textContent;
     }
-    // Set a unique ID for the container if it doesn't have one so we can find it later
-    if (!container.dataset.zerogptId) {
-      container.dataset.zerogptId = 'tweet-' + Math.random().toString(36).substr(2, 9);
+
+    // 2. Get Tweet ID from the time link (URL contains the ID)
+    const timeLink = container.querySelector('time')?.parentElement;
+    if (timeLink && timeLink.href) {
+      const match = timeLink.href.match(/\/status\/(\d+)/);
+      if (match) tweetId = match[1];
     }
-    return { text, tweetId: container.dataset.zerogptId };
+
+    // 3. Get Author Info
+    const userNameDiv = container.querySelector('[data-testid="User-Name"]');
+    if (userNameDiv) {
+      const nameEl = userNameDiv.querySelector('span');
+      if (nameEl) author.name = nameEl.innerText;
+      
+      const links = userNameDiv.querySelectorAll('a');
+      for (const link of links) {
+        if (link.innerText.startsWith('@')) {
+          author.handle = link.innerText;
+          break;
+        }
+      }
+    }
+
+    const pfpEl = container.querySelector('[data-testid="Tweet-User-Avatar"] img') || 
+                  container.querySelector('img[src*="profile_images"]');
+    if (pfpEl) author.pfp = pfpEl.src;
+
+    // Fallback ID
+    if (!tweetId) {
+      if (!container.dataset.zerogptId) {
+        container.dataset.zerogptId = 'local-' + Math.random().toString(36).substr(2, 9);
+      }
+      tweetId = container.dataset.zerogptId;
+    }
+
+    return { text, tweetId, author };
   }
 
-  // Fallback
+  // Fallback for selection-based checks
   const nearbyText = element ? element.closest('[data-testid="tweetText"]') : null;
   if (nearbyText) {
     text = nearbyText.innerText || nearbyText.textContent;
   }
-  return { text, tweetId: null };
+  return { text, tweetId: null, author: null };
 }
 
 function injectBadge(tweetIdOrContainer, percentage) {
   let container;
   if (typeof tweetIdOrContainer === 'string') {
-    container = document.querySelector(`[data-zerogpt-id="${tweetIdOrContainer}"]`);
+    container = document.querySelector(`[data-zerogpt-id="${tweetIdOrContainer}"]`) || 
+                // Also look for it by matching the status link if it's a real ID
+                document.querySelector(`article a[href*="/status/${tweetIdOrContainer}"]`)?.closest('article');
   } else {
     container = tweetIdOrContainer;
   }
@@ -97,6 +133,7 @@ function injectBadge(tweetIdOrContainer, percentage) {
     vertical-align: middle;
     line-height: 1;
     height: 16px;
+    cursor: help;
   `;
   badge.innerText = `AI: ${percentage}%`;
   badge.title = 'ZeroGPT AI Detection Score';
@@ -147,12 +184,11 @@ function initAutoScan() {
         const container = entry.target;
         if (!container.dataset.zerogptScanned) {
           container.dataset.zerogptScanned = "true";
-          const { text, tweetId } = extractTweetInfo(container);
-          if (text && text.length > 20) { // Don't scan very short tweets
+          const info = extractTweetInfo(container);
+          if (info.text && info.text.length > 20) { // Don't scan very short tweets
             chrome.runtime.sendMessage({
               action: "autoScanTweet",
-              text: text,
-              tweetId: tweetId
+              ...info
             });
           }
         }
