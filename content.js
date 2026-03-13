@@ -263,7 +263,7 @@ async function generateWantedPoster(author, percentage) {
   // 7. Footer Branding
   ctx.fillStyle = '#5d4037';
   ctx.font = 'bold 20px Arial';
-  ctx.fillText('STAMPED BY ZEROSLOP.GITHUB.IO', canvas.width / 2, 750);
+  ctx.fillText('STAMPED BY GITHUB.COM/WOODROCK/ZERO-SLOP', canvas.width / 2, 750);
 
   return canvas.toBlob((blob) => {
     const item = new ClipboardItem({ "image/png": blob });
