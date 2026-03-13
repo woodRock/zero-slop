@@ -198,10 +198,28 @@ function App() {
 
         <div className="trending-box">
           <div className="trending-title">Support</div>
-          <div className="trending-item">
+          <div className="trending-item" style={{ cursor: 'default' }}>
             <div className="trending-category">Donations</div>
-            <div className="trending-name">Crypto Address</div>
-            <div className="trending-count" style={{ wordBreak: 'break-all' }}>GY4453u...4qu5D3pump</div>
+            <div className="trending-name">Solana Address</div>
+            <div className="trending-count" style={{ wordBreak: 'break-all', fontSize: '0.75rem', marginBottom: '8px' }}>CNuZoaZkeVTkcqxeXdeDWKcx9217AgvuqQz9xv5dpump</div>
+            <button 
+              onClick={() => {
+                navigator.clipboard.writeText('CNuZoaZkeVTkcqxeXdeDWKcx9217AgvuqQz9xv5dpump');
+                alert('Address copied to clipboard!');
+              }}
+              style={{
+                background: 'var(--twitter-blue)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '9999px',
+                padding: '4px 12px',
+                fontSize: '0.8rem',
+                fontWeight: 'bold',
+                cursor: 'pointer'
+              }}
+            >
+              Copy Address
+            </button>
           </div>
         </div>
       </aside>
