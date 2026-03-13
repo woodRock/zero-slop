@@ -5,6 +5,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const updateBtn = document.getElementById('updateBtn');
   const updateStatus = document.getElementById('updateStatus');
   const autoScanToggle = document.getElementById('autoScanToggle');
+  const autoHideToggle = document.getElementById('autoHideToggle');
+  const thresholdSlider = document.getElementById('thresholdSlider');
+  const thresholdVal = document.getElementById('thresholdVal');
   const exportBtn = document.getElementById('exportBtn');
   const clearHistoryBtn = document.getElementById('clearHistoryBtn');
   const historyList = document.getElementById('historyList');
@@ -23,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load state
-  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'scanHistory'], (result) => {
+  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'autoHide', 'hideThreshold', 'scanHistory'], (result) => {
     if (result.zerogptApiKey) {
       apiKeyInput.value = result.zerogptApiKey;
       statusEl.textContent = 'API Key is already set.';
@@ -31,6 +34,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (result.autoScan) {
       autoScanToggle.checked = true;
+    }
+    if (result.autoHide) {
+      autoHideToggle.checked = true;
+    }
+    if (result.hideThreshold) {
+      thresholdSlider.value = result.hideThreshold;
+      thresholdVal.textContent = result.hideThreshold;
     }
     renderHistory(result.scanHistory || []);
   });
@@ -53,6 +63,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Toggle auto-scan
   autoScanToggle.addEventListener('change', (e) => {
     chrome.storage.local.set({ autoScan: e.target.checked });
+  });
+
+  // Toggle auto-hide
+  autoHideToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ autoHide: e.target.checked });
+  });
+
+  // Update threshold
+  thresholdSlider.addEventListener('input', (e) => {
+    thresholdVal.textContent = e.target.value;
+    chrome.storage.local.set({ hideThreshold: parseInt(e.target.value, 10) });
   });
 
   // Render history

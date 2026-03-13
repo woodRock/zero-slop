@@ -13,12 +13,13 @@ function App() {
 
   const [stats, setStats] = useState({ count: "...", accounts: "..." });
   const [wallOfShame, setWallOfShame] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [allDocs, setAllDocs] = useState([]);
+  
+  const GOAL = 5000; // Community goal
 
   useEffect(() => {
-    // 1. Fetch Total Stats
-    // Note: Firestore REST doesn't have a simple 'count' endpoint without complex queries
-    // So we fetch the recent list and estimate or use a dedicated stats doc if you had one.
-    // For now, let's fetch the actual documents to get real data.
     const fetchRegistryData = async () => {
       try {
         const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=100`;
@@ -26,14 +27,14 @@ function App() {
         if (response.ok) {
           const data = await response.json();
           const documents = data.documents || [];
+          setAllDocs(documents);
           
-          // Update Stats
           setStats({
             count: documents.length.toLocaleString(),
-            accounts: new Set(documents.map(d => d.fields.author_handle?.stringValue)).size.toLocaleString()
+            accounts: new Set(documents.map(d => d.fields.author_handle?.stringValue)).size.toLocaleString(),
+            rawCount: documents.length
           });
 
-          // Update Wall of Shame (Latest 3 with score > 15%)
           const recent = documents
             .map(doc => ({
               name: doc.fields.author_name?.stringValue || "Unknown",
@@ -54,6 +55,23 @@ function App() {
 
     fetchRegistryData();
   }, []);
+
+  const handleSearch = (e) => {
+    const query = e.target.value.toLowerCase();
+    setSearchQuery(query);
+    if (!query) {
+      setSearchResults([]);
+      return;
+    }
+    const results = allDocs
+      .filter(doc => doc.fields.author_handle?.stringValue?.toLowerCase().includes(query))
+      .map(doc => ({
+        handle: doc.fields.author_handle?.stringValue,
+        score: doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0,
+        text: doc.fields.text?.stringValue || ""
+      }));
+    setSearchResults(results);
+  };
 
   const Tweet = ({ author = "ZeroSlop", handle = "zeroslop_ai", children, verified = true, media = null }) => (
     <div className="tweet-card">
@@ -251,10 +269,33 @@ function App() {
 
       {/* Right Sidebar */}
       <aside className="sidebar-right">
-        <div className="search-bar">Search ZeroSlop Docs</div>
-        
+        <div style={{ marginBottom: '16px' }}>
+          <input 
+            type="text" 
+            className="search-bar" 
+            placeholder="Search Registry (e.g. @bot)" 
+            value={searchQuery}
+            onChange={handleSearch}
+            style={{ width: '100%', boxSizing: 'border-box', border: '1px solid var(--twitter-border)' }}
+          />
+          {searchResults.length > 0 && (
+            <div className="search-results" style={{ background: 'var(--twitter-dark-gray)', padding: '10px', borderRadius: '12px', marginTop: '8px' }}>
+              {searchResults.slice(0, 5).map((res, i) => (
+                <div key={i} style={{ marginBottom: '8px', fontSize: '0.85rem' }}>
+                  <div style={{ fontWeight: 'bold' }}>{res.handle}</div>
+                  <div style={{ color: '#f4212e' }}>{Math.round(res.score)}% AI Score</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="slop-counter-box">
-          <div className="counter-label">TOTAL SLOP DETECTED</div>
+          <div className="counter-label">COMMUNITY GOAL: {GOAL}</div>
+          <div style={{ width: '100%', background: '#333', borderRadius: '9999px', height: '8px', margin: '8px 0' }}>
+            <div style={{ width: `${Math.min(((stats.rawCount || 0) / GOAL) * 100, 100)}%`, background: '#1d9bf0', height: '100%', borderRadius: '9999px' }}></div>
+          </div>
+          <div className="counter-label" style={{ marginTop: '16px' }}>TOTAL SLOP DETECTED</div>
           <div className="counter-value">{stats.count}</div>
           <div className="counter-sub">Across {stats.accounts} accounts</div>
         </div>

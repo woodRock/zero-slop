@@ -22,7 +22,11 @@ service cloud.firestore {
         // If the score is missing (manual report), it's allowed.
         // If it's present (auto-scan), it must be between 0 and 100.
         (!('ai_score' in request.resource.data) || 
-         (request.resource.data.ai_score >= 0 && request.resource.data.ai_score <= 100));
+         (request.resource.data.ai_score >= 0 && request.resource.data.ai_score <= 100)) &&
+
+        // 4. Validate upvotes/downvotes
+        (!('upvotes' in request.resource.data) || request.resource.data.upvotes >= 0) &&
+        (!('downvotes' in request.resource.data) || request.resource.data.downvotes >= 0);
 
       // Strictly prohibit DELETING by the public
       // Only the admin (via Firebase Console) can remove entries

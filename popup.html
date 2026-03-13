@@ -59,6 +59,18 @@
       </label>
     </div>
 
+    <div class="toggle-container">
+      <span>Auto-Hide Slop</span>
+      <label class="switch">
+        <input type="checkbox" id="autoHideToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div style="margin-bottom: 15px; font-size: 0.85rem; color: #555;">
+      Hide threshold: <span id="thresholdVal">85</span>%
+      <input type="range" id="thresholdSlider" min="50" max="100" value="85" style="width: 100%; margin-top: 5px;">
+    </div>
+
     <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
     <div id="updateSection">
       <button id="updateBtn" style="background-color: #24292f;">Check for Updates</button>

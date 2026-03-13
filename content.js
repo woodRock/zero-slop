@@ -163,13 +163,52 @@ function injectBadge(tweetIdOrContainer, percentage) {
     cursor: help;
     border: 1px solid rgba(255,255,255,0.2);
   `;
-  badge.innerText = `AI: ${percentage}%`;
+  badge.innerHTML = `AI: ${percentage}% <span class="vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
   badge.title = 'ZeroSlop Registry Score';
+
+  badge.querySelector('.vote-up').addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteSlop", voteType: "up", tweetId: tweetIdOrContainer });
+    badge.querySelector('.vote-up').innerText = '✅';
+  });
+
+  badge.querySelector('.vote-down').addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteSlop", voteType: "down", tweetId: tweetIdOrContainer });
+    badge.querySelector('.vote-down').innerText = '❌';
+  });
 
   const timeElement = container.querySelector('time');
   if (timeElement && timeElement.parentNode) {
     timeElement.parentNode.appendChild(badge);
   }
+
+  // Handle Auto-Hide
+  chrome.storage.local.get(['autoHide', 'hideThreshold'], (result) => {
+    const autoHide = result.autoHide || false;
+    const hideThreshold = result.hideThreshold || 85;
+    
+    if (autoHide && percentage >= hideThreshold) {
+      const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
+      if (contentDiv) {
+        contentDiv.style.filter = 'blur(8px)';
+        contentDiv.style.opacity = '0.6';
+        contentDiv.style.transition = 'all 0.3s ease';
+        contentDiv.style.cursor = 'pointer';
+        contentDiv.title = 'Click to reveal AI Slop';
+        
+        contentDiv.addEventListener('click', function reveal() {
+          contentDiv.style.filter = 'none';
+          contentDiv.style.opacity = '1';
+          contentDiv.style.cursor = 'default';
+          contentDiv.title = '';
+          contentDiv.removeEventListener('click', reveal);
+        });
+      }
+    }
+  });
 }
 
 function initObservers() {

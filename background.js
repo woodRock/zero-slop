@@ -23,11 +23,11 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["all"]
     });
 
-    // Sub-item: Check Thread
+    // Sub-item: Check Thread / Profile
     chrome.contextMenus.create({
       id: "checkThread",
       parentId: "zeroSlopParent",
-      title: "🧵 Check Full Thread",
+      title: "🧵 Scan Full Thread / Profile",
       contexts: ["all"]
     });
 
@@ -87,6 +87,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "manualReport") {
     const score = request.aiScore || 0;
     storeSlopTweet(request.tweetId, request.text, score, request.author, true);
+  } else if (request.action === "voteSlop") {
+    voteSlopTweet(request.tweetId, request.voteType);
   } else if (request.action === "checkRegistry") {
     checkRegistry(request.tweetId).then(data => {
       if (data) {
@@ -190,6 +192,36 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     });
   } catch (e) {
     console.error("ZeroSlop: Firestore error:", e);
+  }
+}
+
+async function voteSlopTweet(tweetId, voteType) {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
+  
+  // First get the current document to increment the vote
+  try {
+    const getResponse = await fetch(url);
+    if (!getResponse.ok) return;
+    const doc = await getResponse.json();
+    
+    const fields = {};
+    if (voteType === 'up') {
+      const currentUp = doc.fields.upvotes?.integerValue || 0;
+      fields.upvotes = { integerValue: parseInt(currentUp) + 1 };
+    } else {
+      const currentDown = doc.fields.downvotes?.integerValue || 0;
+      fields.downvotes = { integerValue: parseInt(currentDown) + 1 };
+    }
+    
+    let maskParams = `&updateMask.fieldPaths=${voteType === 'up' ? 'upvotes' : 'downvotes'}`;
+    
+    await fetch(url + maskParams, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields })
+    });
+  } catch (e) {
+    console.error("ZeroSlop: Error voting", e);
   }
 }
 
