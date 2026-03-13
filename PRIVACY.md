@@ -40,7 +40,7 @@ You have full control over your data:
 In future versions, ZeroSlop may include an optional feature to voluntarily report "false positives" or "false negatives" to help improve AI detection. This feature will be **strictly opt-in**, and no data will be shared without your explicit consent for each report.
 
 ## 6. Contact
-If you have any questions about this Privacy Policy, please contact us through the [ZeroSlop GitHub Repository](https://github.com/woodj/zero-slop).
+If you have any questions about this Privacy Policy, please contact us through the [ZeroSlop GitHub Repository](https://github.com/woodrock/zero-slop).
 
 ---
 *ZeroSlop is an independent project and is not affiliated with Twitter (X) or ZeroGPT.com.*

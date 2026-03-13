@@ -120,7 +120,7 @@ function App() {
         <section id="installation">
           <Tweet>
             <h2>Developer Installation</h2>
-            <p>1. Clone: <code>git clone https://github.com/woodj/zero-slop.git</code></p>
+            <p>1. Clone: <code>git clone https://github.com/woodrock/zero-slop.git</code></p>
             <p>2. Open <code>chrome://extensions/</code></p>
             <p>3. Enable <strong>Developer mode</strong></p>
             <p>4. <strong>Load unpacked</strong> and select the <code>zero-slop</code> folder.</p>
@@ -150,7 +150,7 @@ function App() {
           <Tweet>
             <h2>Privacy Policy</h2>
             <p>ZeroSlop is built with a privacy-first mindset. No data is stored on our servers. All processing happens between your browser and the ZeroGPT API.</p>
-            <a href="https://github.com/woodj/zero-slop/blob/main/PRIVACY.md" target="_blank" className="btn-inline">Read full policy →</a>
+            <a href="https://github.com/woodrock/zero-slop/blob/main/PRIVACY.md" target="_blank" className="btn-inline">Read full policy →</a>
           </Tweet>
         </section>
 
