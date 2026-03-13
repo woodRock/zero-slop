@@ -1,4 +1,4 @@
-// Firebase Configuration (Matching your provided config)
+// Firebase Configuration
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDDx5ZbgWcgsKxsP78EubqyWRHL9yxdXec",
   projectId: "zero-slop"
@@ -7,7 +7,6 @@ const FIREBASE_CONFIG = {
 // Initialize context menu
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
-    // Parent Menu
     chrome.contextMenus.create({
       id: "zeroSlopParent",
       title: "ZeroSlop",
@@ -15,7 +14,6 @@ chrome.runtime.onInstalled.addListener(() => {
       documentUrlPatterns: ["*://*.twitter.com/*", "*://*.x.com/*"]
     });
 
-    // Sub-item: Check
     chrome.contextMenus.create({
       id: "checkZeroGPT",
       parentId: "zeroSlopParent",
@@ -23,7 +21,6 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["all"]
     });
 
-    // Sub-item: Report
     chrome.contextMenus.create({
       id: "reportSlop",
       parentId: "zeroSlopParent",
@@ -79,7 +76,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           action: "showResult",
           data: { fakePercentage: data.ai_score, feedback_message: "From ZeroSlop Registry" },
           tweetId: request.tweetId,
-          isAutoScan: true // Use autoScan style (badge only, no overlay)
+          isAutoScan: true
         });
       }
     });
@@ -88,21 +85,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 async function checkRegistry(tweetId) {
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
-  
   try {
     const response = await fetch(url);
     if (response.ok) {
       const doc = await response.json();
-      // Map Firestore REST format back to simple object
       const fields = doc.fields;
       return {
         ai_score: fields.ai_score?.doubleValue || fields.ai_score?.integerValue || 0,
         status: fields.status?.stringValue
       };
     }
-  } catch (e) {
-    // Silently fail for background checks
-  }
+  } catch (e) {}
   return null;
 }
 
@@ -141,12 +134,13 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
 }
 
 async function storeSlopTweet(tweetId, text, percentage, author, isManual = false) {
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
+  // Use the 'commit' endpoint for a guaranteed create-or-update with specific document ID
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
   
   const fields = {
     tweet_id: { stringValue: tweetId },
     text: { stringValue: text?.substring(0, 1000) || "" },
-    ai_score: { doubleValue: percentage },
+    ai_score: { doubleValue: parseFloat(percentage) || 0.0 },
     status: { stringValue: "pending" },
     last_updated: { timestampValue: new Date().toISOString() }
   };
@@ -158,18 +152,28 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     fields.author_pfp = { stringValue: author.pfp || "" };
   }
 
+  const write = {
+    update: {
+      name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}`,
+      fields: fields
+    }
+  };
+
   try {
     const response = await fetch(url, {
-      method: "PATCH",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields })
+      body: JSON.stringify({ writes: [write] })
     });
 
     if (response.ok) {
-      console.log(`ZeroSlop: ${isManual ? 'Manual report' : 'Auto detection'} for ${tweetId} saved.`);
+      console.log(`ZeroSlop: ${isManual ? 'Manual report' : 'Auto detection'} for ${tweetId} saved successfully.`);
+    } else {
+      const errorText = await response.text();
+      console.error("ZeroSlop: Firestore Save Error:", errorText);
     }
   } catch (e) {
-    console.error("ZeroSlop: Firestore error:", e);
+    console.error("ZeroSlop: Network error saving to Firestore:", e);
   }
 }
 
