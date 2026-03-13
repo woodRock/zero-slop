@@ -1,60 +1,67 @@
-# ZeroSlop: The ZeroGPT Tweet Checker Chrome Extension
+# ZeroSlop: The Community-Powered AI Detection Shield 🛡️✨
 
-![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-4285F4?style=flat-square&logo=google-chrome&logoColor=white)
-![Manifest V3](https://img.shields.io/badge/Manifest-V3-brightgreen?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)
-![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)
+![ZeroSlop Hero](docs/public/banner.jpg)
 
-🔍 Instantly detect AI-generated tweets on Twitter (X) using the ZeroGPT Business API.
+**ZeroSlop** is an open-source Chrome extension designed to identify and expose AI-generated "slop" on Twitter (X). Built with a community-first ethos, it turns detection into a collective effort to keep the timeline human.
 
-## Installation
+[**Download Latest Version**](https://github.com/woodrock/zero-slop/raw/main/dist/zero-slop-extension.zip) | [**Official Website**](https://woodrock.github.io/zero-slop/)
 
-1.  Open Chrome and go to `chrome://extensions/`.
-2.  Enable **Developer mode** in the top right corner.
-3.  Click **Load unpacked**.
-4.  Select the folder containing these files (`zero-slop`).
+---
 
-## Setup
+## 🚀 Key Features
 
-1.  **Get an API Key:** 
-    *   Create an account at [ZeroGPT.com](https://www.zerogpt.com/login).
-    *   Navigate to your [Dashboard](https://www.zerogpt.com/dashboard).
-    *   Go to the **API** section to generate your unique API Key.
-2.  **Add Credits:** 
-    *   **Important:** The ZeroGPT Business API is a paid service. You must add a balance or subscribe to a plan in your [ZeroGPT Account](https://www.zerogpt.com/dashboard) to use this extension. Without credits, the extension will return a "Not enough credits" error.
-3.  **Configure the Extension:**
-    *   Click on the extension icon in your Chrome toolbar.
-    *   Paste your API Key into the popup.
-    *   Click **Save API Key**.
+### 🧠 Community-Driven Registry
+ZeroSlop is like **SponsorBlock for AI**. When one user scans a tweet, the result is saved to our shared community registry. As you scroll, AI score badges appear instantly for any tweet previously identified by the community—no extra API calls needed.
 
-## How to Use
+### 🧵 Specialized Scans
+*   **Thread Detection:** Analyze entire conversational threads as a single block for maximum accuracy.
+*   **Profile Analysis:** Expose "Slop Factories" by scanning an account's recent timeline activity collectively.
 
-1.  Go to [Twitter (X)](https://twitter.com).
-2.  **Option 1:** Highlight text in a tweet, right-click, and select **Check with ZeroGPT**.
-3.  **Option 2:** Right-click anywhere on a tweet (without selecting text) and select **Check with ZeroGPT**. The extension will automatically extract the text of that tweet.
-4.  A result overlay will appear in the top-right corner of the page showing the detection percentage.
+### 🛡️ Auto-Hide Slop
+Tired of seeing bot replies? Enable **Auto-Hide** in your settings to automatically blur out any tweet that scores above your personal AI threshold (e.g., >85%). Click to reveal if you're curious!
 
-## Features
+### 🖼️ Wanted Posters
+Expose the slop-posters with style. Generate a custom, high-impact "WANTED" poster for any detected slop and copy it to your clipboard with one click.
 
-*   **High Accuracy:** Uses the official ZeroGPT Business API for enterprise-grade detection.
-*   **Seamless Integration:** Native-feeling Twitter-style results.
-*   **Maximum Visibility:** High z-index overlay that's always visible.
-*   **Privacy First:** API key is stored locally in your browser.
+![Wanted Poster Demo](docs/public/zero-slop-wanted-posters.mov)
 
-## Testing
+---
 
-This project uses Jest for unit testing. To run tests locally:
+## 🛠️ How it Works
 
-1.  Install Node.js.
-2.  Run `npm install`.
-3.  Run `npm test`.
+ZeroSlop combines the **ZeroGPT Business API** with a high-performance **Firestore Registry** to provide real-time protection.
 
-## API Note
+![Architecture Diagram](docs/public/architecture-diagram.jpeg)
 
-This extension uses the ZeroGPT Business API endpoint: `https://api.zerogpt.com/api/detect/detectText`. Ensure your API key is valid for this endpoint.
+1.  **Detection:** Extension extracts tweet text and sends it to ZeroGPT.
+2.  **Registry:** Detections are stored in a global community database.
+3.  **Protection:** Other users see badges and auto-hiding based on community data.
+4.  **Verification:** The community upvotes/downvotes detections to ensure registry accuracy.
 
-## Support
+---
 
-If you'd like to support the development and maintenance of ZeroSlop, you can contribute to the following Contract Address (CA). This is entirely optional and only for those who wish to support the work:
+## 📥 Installation
 
+### Option 1: Direct Download (Recommended)
+1.  [Download the extension ZIP](https://github.com/woodrock/zero-slop/raw/main/dist/zero-slop-extension.zip).
+2.  Extract the ZIP file to a folder on your computer.
+3.  Open `chrome://extensions/` in your browser.
+4.  Enable **Developer mode** (top right toggle).
+5.  Click **Load unpacked** and select the folder you just extracted.
+
+### Option 2: Developers
+```bash
+git clone https://github.com/woodrock/zero-slop.git
+```
+Follow the manual installation steps above, selecting the cloned repository folder.
+
+---
+
+## 🪙 ZeroSlop Coin (CA)
+Support the mission to clean up the timeline:
 `CNuZoaZkeVTkcqxeXdeDWKcx9217AgvuqQz9xv5dpump`
+
+---
+
+## ⚖️ License
+ZeroSlop is open-source and free forever. Built for a cleaner, more human internet. 🛡️✨
