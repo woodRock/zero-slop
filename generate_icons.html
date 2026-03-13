@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <h1>ZeroSlop Icon Generator</h1>
+  <p>Right-click each image and "Save Image As..." into your <code>icons/</code> folder.</p>
+  
+  <div id="container"></div>
+
+  <script>
+    const sizes = [16, 48, 128];
+    const container = document.getElementById('container');
+
+    sizes.forEach(size => {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+
+      // Background
+      ctx.fillStyle = '#1D9BF0';
+      const radius = size * 0.2;
+      
+      // Rounded rect
+      ctx.beginPath();
+      ctx.moveTo(radius, 0);
+      ctx.lineTo(size - radius, 0);
+      ctx.quadraticCurveTo(size, 0, size, radius);
+      ctx.lineTo(size, size - radius);
+      ctx.quadraticCurveTo(size, size, size - radius, size);
+      ctx.lineTo(radius, size);
+      ctx.quadraticCurveTo(0, size, 0, size - radius);
+      ctx.lineTo(0, radius);
+      ctx.quadraticCurveTo(0, 0, radius, 0);
+      ctx.closePath();
+      ctx.fill();
+
+      // Z Text
+      ctx.fillStyle = 'white';
+      ctx.font = `bold ${Math.floor(size * 0.75)}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Z', size / 2, size / 2 + (size * 0.05));
+
+      const img = document.createElement('img');
+      img.src = canvas.toDataURL('image/png');
+      img.style.margin = '10px';
+      img.style.border = '1px solid #ccc';
+      
+      const div = document.createElement('div');
+      div.innerHTML = `<h3>${size}x${size} (icon${size}.png)</h3>`;
+      div.appendChild(img);
+      container.appendChild(div);
+    });
+  </script>
+</body>
+</html>
