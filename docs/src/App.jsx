@@ -5,7 +5,9 @@ function App() {
 
   const Tweet = ({ author = "ZeroSlop", handle = "zeroslop_ai", children, verified = true, media = null }) => (
     <div className="tweet-card">
-      <div className="avatar">{author[0]}</div>
+      <div className="avatar">
+        <img src="/zero-slop/icon.jpg" alt="ZeroSlop Icon" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+      </div>
       <div className="tweet-content">
         <div className="tweet-header">
           <span className="author-name">{author}</span>
@@ -39,7 +41,9 @@ function App() {
       {/* Left Sidebar */}
       <aside className="sidebar-left">
         <div className="logo-container">
-          <a href="#" className="logo">Z</a>
+          <a href="#" className="logo">
+            <img src="/zero-slop/icon.jpg" alt="Logo" style={{ width: '32px', height: '32px', borderRadius: '50%' }} />
+          </a>
         </div>
         <nav>
           <a href="#" className="nav-item active"><span className="nav-text">Home</span></a>
@@ -58,7 +62,7 @@ function App() {
         </header>
 
         <Tweet 
-          media={{ type: 'video', src: '/zero-slop/zero-slop-usage-video.mov' }}
+          media={{ type: 'image', src: '/zero-slop/banner.jpg' }}
         >
           <h2>Welcome to ZeroSlop</h2>
           <p>Instantly detect AI-generated tweets on Twitter (X) using the ZeroGPT Business API. Stop the slop, see the truth. 🔍✨</p>
@@ -72,6 +76,12 @@ function App() {
               <p>Keys stay in your browser.</p>
             </div>
           </div>
+        </Tweet>
+
+        <Tweet 
+          media={{ type: 'video', src: '/zero-slop/zero-slop-usage-video.mov' }}
+        >
+          <p>Check out ZeroSlop in action! Seamlessly integrated into your X timeline. 👇</p>
         </Tweet>
 
         <section id="features">
