@@ -134,8 +134,8 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
 }
 
 async function storeSlopTweet(tweetId, text, percentage, author, isManual = false) {
-  // Use the 'commit' endpoint for a guaranteed create-or-update with specific document ID
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
+  // Use the standard 'patch' method for a single document to ensure it creates if missing
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
   
   const fields = {
     tweet_id: { stringValue: tweetId },
@@ -147,30 +147,23 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
 
   if (isManual) fields.manual_report = { booleanValue: true };
   if (author) {
-    fields.author_name = { stringValue: author.name || "" };
-    fields.author_handle = { stringValue: author.handle || "" };
-    fields.author_pfp = { stringValue: author.pfp || "" };
+    if (author.name) fields.author_name = { stringValue: author.name };
+    if (author.handle) fields.author_handle = { stringValue: author.handle };
+    if (author.pfp) fields.author_pfp = { stringValue: author.pfp };
   }
-
-  const write = {
-    update: {
-      name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}`,
-      fields: fields
-    }
-  };
 
   try {
     const response = await fetch(url, {
-      method: "POST",
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ writes: [write] })
+      body: JSON.stringify({ fields })
     });
 
     if (response.ok) {
-      console.log(`ZeroSlop: ${isManual ? 'Manual report' : 'Auto detection'} for ${tweetId} saved successfully.`);
+      console.log(`ZeroSlop: ${isManual ? 'Manual report' : 'Auto detection'} for ${tweetId} saved.`);
     } else {
       const errorText = await response.text();
-      console.error("ZeroSlop: Firestore Save Error:", errorText);
+      console.error("ZeroSlop: Firestore REST Error:", errorText);
     }
   } catch (e) {
     console.error("ZeroSlop: Network error saving to Firestore:", e);
