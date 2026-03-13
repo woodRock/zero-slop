@@ -2,5 +2,5 @@ node_modules/
 .DS_Store
 .env
 firebase-config.js
-zero-slop-extension.zip
-dist/
+# zero-slop-extension.zip is now tracked in dist/
+
