@@ -67,12 +67,14 @@ function App() {
         <nav>
           <a href="#" className="nav-item active"><span className="nav-text">Home</span></a>
           <a href="#features" className="nav-item"><span className="nav-text">Features</span></a>
+          <a href="#how-it-works" className="nav-item"><span className="nav-text">How it Works</span></a>
           <a href="#registry" className="nav-item"><span className="nav-text">Registry</span></a>
           <a href="#wanted" className="nav-item"><span className="nav-text">Wanted</span></a>
           <a href="#installation" className="nav-item"><span className="nav-text">Install</span></a>
+          <a href="#faq" className="nav-item"><span className="nav-text">FAQ</span></a>
           <a href="#privacy" className="nav-item"><span className="nav-text">Privacy</span></a>
         </nav>
-        <a href="#installation" className="post-btn">Install Now</a>
+        <a href="https://twitter.com/intent/tweet?text=Identify%20AI%20slop%20on%20the%20timeline%20with%20ZeroSlop!%20%F0%9F%9B%A1%EF%B8%8F%F0%9F%94%8D%20Check%20it%20out:%20https://github.com/woodrock/zero-slop" target="_blank" className="post-btn">Share on X</a>
       </aside>
 
       {/* Main Timeline */}
@@ -104,6 +106,15 @@ function App() {
           <p>Check out ZeroSlop in action! Seamlessly integrated into your X timeline. 👇</p>
         </Tweet>
 
+        <section id="how-it-works">
+          <Tweet
+            media={{ type: 'image', src: `${baseUrl}architecture-diagram.jpeg` }}
+          >
+            <h2>How it Works</h2>
+            <p>ZeroSlop combines cutting-edge AI detection with community-driven reporting. When you scan a tweet, our engine analyzes it and saves the result to a shared registry for everyone to see. 🧠⚡</p>
+          </Tweet>
+        </section>
+
         <section id="registry">
           <Tweet
             media={{ type: 'video', src: `${baseUrl}zero-slop-self-reporting.mov` }}
@@ -122,22 +133,52 @@ function App() {
           </Tweet>
         </section>
 
+        <section id="wall-of-shame">
+          <div className="wall-title">Recent Detections (Wall of Shame)</div>
+          <div className="wall-grid">
+            <div className="wall-item">
+              <div className="wall-pfp">🤖</div>
+              <div className="wall-info">
+                <div className="wall-name">AI Bot #1</div>
+                <div className="wall-score">98% AI</div>
+              </div>
+            </div>
+            <div className="wall-item">
+              <div className="wall-pfp">🤖</div>
+              <div className="wall-info">
+                <div className="wall-name">Engagement Farmer</div>
+                <div className="wall-score">85% AI</div>
+              </div>
+            </div>
+            <div className="wall-item">
+              <div className="wall-pfp">🤖</div>
+              <div className="wall-info">
+                <div className="wall-name">Slop Merchant</div>
+                <div className="wall-score">92% AI</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section id="features">
           <Tweet
             media={{ type: 'image', src: `${baseUrl}zero-slop-right-click.png` }}
           >
             <h2>Native Integration</h2>
             <p>The timeline is being flooded with AI-generated slop. Our extension integrates natively into X to help you identify bot-like behavior instantly.</p>
-            <ul>
-              <li>Native-feeling Twitter UI</li>
-              <li>Real-time scanning</li>
-              <li>Customizable Auto-Scan</li>
-            </ul>
+            <div className="browser-icons">
+              <span>Works on:</span>
+              <span title="Google Chrome">🌐 Chrome</span>
+              <span title="Microsoft Edge">🌐 Edge</span>
+              <span title="Brave Browser">🌐 Brave</span>
+            </div>
           </Tweet>
         </section>
 
         <section id="installation">
-          <Tweet>
+          <Tweet
+            media={{ type: 'image', src: `${baseUrl}installation-guide.jpeg` }}
+          >
             <h2>Developer Installation</h2>
             <p>1. Clone: <code>git clone https://github.com/woodrock/zero-slop.git</code></p>
             <p>2. Open <code>chrome://extensions/</code></p>
@@ -146,23 +187,22 @@ function App() {
           </Tweet>
         </section>
 
-        <section id="setup">
-          <Tweet
-            media={{ type: 'image', src: `${baseUrl}zero-slop-analyzing.png` }}
-          >
-            <h2>Initial Setup</h2>
-            <p>Get your API Key from <a href="https://www.zerogpt.com/dashboard" target="_blank" className="btn-inline">ZeroGPT Dashboard</a>.</p>
-            <p>Add credits, paste the key into the extension popup, and you're ready to go!</p>
-          </Tweet>
-        </section>
-
-        <section id="usage">
-          <Tweet
-            media={{ type: 'image', src: `${baseUrl}zero-slop-result.png` }}
-          >
-            <h2>How to Use</h2>
-            <p>Right-click any tweet and select <strong>Check with ZeroGPT</strong>. Our AI agent will scan the text and give you a probability score in the corner of your screen.</p>
-          </Tweet>
+        <section id="faq">
+          <div className="faq-container">
+            <h2>Frequently Asked Questions</h2>
+            <div className="faq-item">
+              <h3>Does this cost money?</h3>
+              <p>The extension is free to download. However, it uses the ZeroGPT Business API which requires credits. You'll need your own API key with a balance to perform new scans.</p>
+            </div>
+            <div className="faq-item">
+              <h3>Is it 100% accurate?</h3>
+              <p>AI detection is probabilistic. A high score means the text has strong markers of being AI-generated, while a low score suggests human writing. Always use your best judgment!</p>
+            </div>
+            <div className="faq-item">
+              <h3>What happens when I report a tweet?</h3>
+              <p>Reporting a tweet adds its ID and metadata to our community registry. This allows other users to see the AI score instantly without performing a new scan.</p>
+            </div>
+          </div>
         </section>
 
         <section id="privacy">
@@ -182,6 +222,12 @@ function App() {
       <aside className="sidebar-right">
         <div className="search-bar">Search ZeroSlop Docs</div>
         
+        <div className="slop-counter-box">
+          <div className="counter-label">TOTAL SLOP DETECTED</div>
+          <div className="counter-value">124,892</div>
+          <div className="counter-sub">Across 15,204 accounts</div>
+        </div>
+
         <div className="trending-box">
           <div className="trending-title">Project Stats</div>
           <div className="trending-item">

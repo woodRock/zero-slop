@@ -253,6 +253,117 @@ header.sticky-header h2 {
   color: var(--twitter-light-gray);
 }
 
+.slop-counter-box {
+  background: linear-gradient(135deg, #16181c 0%, #000000 100%);
+  border: 1px solid var(--twitter-blue);
+  border-radius: 16px;
+  padding: 20px;
+  margin-bottom: 16px;
+  text-align: center;
+  box-shadow: 0 0 15px var(--ai-glow);
+}
+
+.counter-label {
+  font-size: 0.75rem;
+  font-weight: bold;
+  color: var(--twitter-blue);
+  letter-spacing: 1px;
+}
+
+.counter-value {
+  font-size: 2rem;
+  font-weight: 900;
+  margin: 8px 0;
+  color: white;
+  font-family: monospace;
+}
+
+.counter-sub {
+  font-size: 0.75rem;
+  color: var(--twitter-light-gray);
+}
+
+.wall-title {
+  padding: 16px;
+  font-size: 1.25rem;
+  font-weight: bold;
+  border-bottom: 1px solid var(--twitter-border);
+}
+
+.wall-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background-color: var(--twitter-border);
+  border-bottom: 1px solid var(--twitter-border);
+}
+
+.wall-item {
+  background-color: var(--twitter-black);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: background-color 0.2s;
+}
+
+.wall-item:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.wall-pfp {
+  width: 60px;
+  height: 60px;
+  background: #2f3336;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  margin-bottom: 12px;
+}
+
+.wall-name {
+  font-weight: bold;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+}
+
+.wall-score {
+  color: #f4212e;
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+
+.browser-icons {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: 0.85rem;
+  color: var(--twitter-light-gray);
+}
+
+.faq-container {
+  padding: 24px 16px;
+  border-bottom: 1px solid var(--twitter-border);
+}
+
+.faq-item {
+  margin-bottom: 24px;
+}
+
+.faq-item h3 {
+  font-size: 1.1rem;
+  margin-bottom: 8px;
+  color: var(--twitter-blue);
+}
+
+.faq-item p {
+  color: var(--text-white);
+  line-height: 1.5;
+}
+
 .trending-box {
   background-color: var(--twitter-dark-gray);
   border-radius: 16px;
