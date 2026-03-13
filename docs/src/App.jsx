@@ -47,7 +47,7 @@ function App() {
         )}
         <div className="tweet-actions">
           <div className="action-item"><span>💬</span> 12</div>
-          <div className="action-item"><span>🔁</span> 45</div>
+          <div className="action-item) "><span>🔁</span> 45</div>
           <div className="action-item"><span>❤️</span> 128</div>
           <div className="action-item"><span>📊</span> 12k</div>
         </div>
@@ -179,11 +179,26 @@ function App() {
           <Tweet
             media={{ type: 'image', src: `${baseUrl}installation-guide.jpeg` }}
           >
-            <h2>Developer Installation</h2>
-            <p>1. Clone: <code>git clone https://github.com/woodrock/zero-slop.git</code></p>
-            <p>2. Open <code>chrome://extensions/</code></p>
-            <p>3. Enable <strong>Developer mode</strong></p>
-            <p>4. <strong>Load unpacked</strong> and select the <code>zero-slop</code> folder.</p>
+            <h2>Installation Guide</h2>
+            <p>Choose your preferred way to install ZeroSlop:</p>
+            
+            <div style={{ marginBottom: '20px' }}>
+              <h3>Option 1: Direct Download (Easiest)</h3>
+              <p>1. <a href="https://github.com/woodrock/zero-slop/raw/main/zero-slop-extension.zip" className="btn-inline" style={{ fontWeight: 'bold' }}>Download zero-slop-extension.zip</a></p>
+              <p>2. Extract the ZIP file to a folder on your computer.</p>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <h3>Option 2: Developers (Git)</h3>
+              <p>1. Clone the repo: <code>git clone https://github.com/woodrock/zero-slop.git</code></p>
+            </div>
+
+            <div style={{ borderTop: '1px solid #2f3336', paddingTop: '15px' }}>
+              <h3>Final Steps (All users)</h3>
+              <p>1. Open <code>chrome://extensions/</code> in your browser.</p>
+              <p>2. Enable <strong>Developer mode</strong> (top right toggle).</p>
+              <p>3. Click <strong>Load unpacked</strong> and select the <code>zero-slop</code> folder you just extracted/cloned.</p>
+            </div>
           </Tweet>
         </section>
 
