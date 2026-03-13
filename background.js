@@ -1,10 +1,8 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore, doc, setDoc, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import firebaseConfig from "./firebase-config.js";
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Firebase Configuration (Matching your provided config)
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDDx5ZbgWcgsKxsP78EubqyWRHL9yxdXec",
+  projectId: "zero-slop"
+};
 
 // Initialize context menu
 chrome.runtime.onInstalled.addListener(() => {
@@ -33,7 +31,7 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["all"]
     });
 
-    console.log("ZeroSlop: Hierarchical context menus created.");
+    console.log("ZeroSlop: Context menus initialized.");
   });
 });
 
@@ -111,32 +109,42 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
   }
 }
 
+/**
+ * Uses Firestore REST API to store reports without external libraries
+ */
 async function storeSlopTweet(tweetId, text, percentage, author, isManual = false) {
-  try {
-    const tweetRef = doc(db, "slop_registry", tweetId);
-    const slopData = {
-      tweet_id: tweetId,
-      text: text?.substring(0, 1000) || "",
-      ai_score: percentage,
-      report_count: increment(1),
-      status: "pending",
-      last_updated: serverTimestamp(),
-      created_at: serverTimestamp()
-    };
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
+  
+  const fields = {
+    tweet_id: { stringValue: tweetId },
+    text: { stringValue: text?.substring(0, 1000) || "" },
+    ai_score: { doubleValue: percentage },
+    status: { stringValue: "pending" },
+    last_updated: { timestampValue: new Date().toISOString() }
+  };
 
-    if (isManual) slopData.manual_report = true;
-    if (author) {
-      slopData.author_info = {
-        name: author.name,
-        handle: author.handle,
-        pfp_url: author.pfp
-      };
+  if (isManual) fields.manual_report = { booleanValue: true };
+  if (author) {
+    fields.author_name = { stringValue: author.name || "" };
+    fields.author_handle = { stringValue: author.handle || "" };
+    fields.author_pfp = { stringValue: author.pfp || "" };
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: "PATCH", // Use PATCH to create or update (merge)
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields })
+    });
+
+    if (response.ok) {
+      console.log(`ZeroSlop: ${isManual ? 'Manual report' : 'Auto detection'} for ${tweetId} saved via REST.`);
+    } else {
+      const error = await response.text();
+      console.error("ZeroSlop: Firestore REST Error:", error);
     }
-    
-    await setDoc(tweetRef, slopData, { merge: true });
-    console.log(`ZeroSlop: ${isManual ? 'Manual report' : 'Auto detection'} for ${tweetId} saved.`);
   } catch (e) {
-    console.error("ZeroSlop: Firestore error:", e);
+    console.error("ZeroSlop: Network error saving to Firestore:", e);
   }
 }
 
