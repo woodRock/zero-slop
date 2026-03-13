@@ -46,20 +46,17 @@ function extractTweetInfo(element) {
   let author = { name: null, handle: null, pfp: null };
   
   if (container) {
-    // 1. Get Text
     const tweetTextDiv = container.querySelector('[data-testid="tweetText"]');
     if (tweetTextDiv) {
       text = tweetTextDiv.innerText || tweetTextDiv.textContent;
     }
 
-    // 2. Get Tweet ID from the time link (URL contains the ID)
     const timeLink = container.querySelector('time')?.parentElement;
     if (timeLink && timeLink.href) {
       const match = timeLink.href.match(/\/status\/(\d+)/);
       if (match) tweetId = match[1];
     }
 
-    // 3. Get Author Info
     const userNameDiv = container.querySelector('[data-testid="User-Name"]');
     if (userNameDiv) {
       const nameEl = userNameDiv.querySelector('span');
@@ -78,7 +75,6 @@ function extractTweetInfo(element) {
                   container.querySelector('img[src*="profile_images"]');
     if (pfpEl) author.pfp = pfpEl.src;
 
-    // Fallback ID
     if (!tweetId) {
       if (!container.dataset.zerogptId) {
         container.dataset.zerogptId = 'local-' + Math.random().toString(36).substr(2, 9);
@@ -89,7 +85,6 @@ function extractTweetInfo(element) {
     return { text, tweetId, author };
   }
 
-  // Fallback for selection-based checks
   const nearbyText = element ? element.closest('[data-testid="tweetText"]') : null;
   if (nearbyText) {
     text = nearbyText.innerText || nearbyText.textContent;
@@ -100,111 +95,83 @@ function extractTweetInfo(element) {
 function injectBadge(tweetIdOrContainer, percentage) {
   let container;
   if (typeof tweetIdOrContainer === 'string') {
-    container = document.querySelector(`[data-zerogpt-id="${tweetIdOrContainer}"]`) || 
-                // Also look for it by matching the status link if it's a real ID
-                document.querySelector(`article a[href*="/status/${tweetIdOrContainer}"]`)?.closest('article');
+    container = document.querySelector(`article a[href*="/status/${tweetIdOrContainer}"]`)?.closest('article') ||
+                document.querySelector(`[data-zerogpt-id="${tweetIdOrContainer}"]`);
   } else {
     container = tweetIdOrContainer;
   }
 
-  if (!container) return;
-
-  // Avoid duplicate badges
-  if (container.querySelector('.zerogpt-badge')) return;
+  if (!container || container.querySelector('.zerogpt-badge')) return;
 
   const badge = document.createElement('div');
   badge.className = 'zerogpt-badge';
   
-  let color = '#17a2b8'; // Default info
-  if (percentage > 70) color = '#dc3545'; // High AI -> Red
-  else if (percentage < 30) color = '#28a745'; // Low AI -> Green
-  else color = '#ffc107'; // Medium AI -> Yellow
+  let color = '#17a2b8';
+  if (percentage > 70) color = '#f4212e'; // Twitter Red
+  else if (percentage < 30) color = '#00ba7c'; // Twitter Green
+  else color = '#ffd700'; // Yellow
 
   badge.style.cssText = `
     display: inline-flex;
     align-items: center;
-    padding: 2px 6px;
+    padding: 2px 8px;
     margin-left: 8px;
-    border-radius: 12px;
+    border-radius: 9999px;
     font-size: 11px;
     font-weight: bold;
     color: white;
     background-color: ${color};
     vertical-align: middle;
     line-height: 1;
-    height: 16px;
+    height: 18px;
     cursor: help;
+    border: 1px solid rgba(255,255,255,0.2);
   `;
   badge.innerText = `AI: ${percentage}%`;
-  badge.title = 'ZeroGPT AI Detection Score';
+  badge.title = 'ZeroSlop Registry Score';
 
-  // Find a good place to inject. Usually next to the timestamp or username
   const timeElement = container.querySelector('time');
   if (timeElement && timeElement.parentNode) {
     timeElement.parentNode.appendChild(badge);
-  } else {
-    // Fallback: prepend to tweet text
-    const textElement = container.querySelector('[data-testid="tweetText"]');
-    if (textElement && textElement.parentNode) {
-      // Create a wrapper to make it look decent
-      const wrapper = document.createElement('div');
-      wrapper.style.marginBottom = '4px';
-      wrapper.appendChild(badge);
-      textElement.parentNode.insertBefore(wrapper, textElement);
-    }
   }
 }
 
-// Auto-scan feature: use IntersectionObserver to detect new tweets
-chrome.storage.local.get(['autoScan'], (result) => {
-  if (result.autoScan) {
-    initAutoScan();
-  }
-});
-
-// Listen for auto-scan toggle changes from popup
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === 'local' && changes.autoScan) {
-    if (changes.autoScan.newValue) {
-      initAutoScan();
-    } else {
-      if (window.zerogptObserver) {
-        window.zerogptObserver.disconnect();
-      }
-    }
-  }
-});
-
-function initAutoScan() {
+// Registry Check & Auto-Scan
+function initObservers() {
   if (window.zerogptObserver) window.zerogptObserver.disconnect();
   
   window.zerogptObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         const container = entry.target;
-        if (!container.dataset.zerogptScanned) {
-          container.dataset.zerogptScanned = "true";
+        if (!container.dataset.zerogptChecked) {
+          container.dataset.zerogptChecked = "true";
           const info = extractTweetInfo(container);
-          if (info.text && info.text.length > 20) { // Don't scan very short tweets
-            chrome.runtime.sendMessage({
-              action: "autoScanTweet",
-              ...info
+          
+          if (info.tweetId && !info.tweetId.startsWith('local-')) {
+            // 1. Always check the registry first (SponsorBlock style)
+            chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
+            
+            // 2. If autoScan is ON, perform a fresh detection ONLY IF the registry check fails 
+            // (handled in background.js or by simply running both)
+            chrome.storage.local.get(['autoScan'], (result) => {
+              if (result.autoScan) {
+                chrome.runtime.sendMessage({ action: "autoScanTweet", ...info });
+              }
             });
           }
         }
       }
     });
-  }, { threshold: 0.5 });
+  }, { threshold: 0.1 });
 
-  // Observe existing tweets
   const articles = document.querySelectorAll('article');
   articles.forEach(el => window.zerogptObserver.observe(el));
 
-  // MutationObserver to catch newly loaded tweets
   const mutationObserver = new MutationObserver((mutations) => {
     mutations.forEach(mutation => {
       mutation.addedNodes.forEach(node => {
-        if (node.nodeType === 1) { // ELEMENT_NODE
+        if (node.nodeType === 1) {
           if (node.tagName === 'ARTICLE') {
             window.zerogptObserver.observe(node);
           } else {
@@ -218,6 +185,9 @@ function initAutoScan() {
 
   mutationObserver.observe(document.body, { childList: true, subtree: true });
 }
+
+// Start observing
+initObservers();
 
 function showOverlay(message, type = "info") {
   const existing = document.getElementById('zerogpt-overlay');
@@ -238,7 +208,7 @@ function showOverlay(message, type = "info") {
     z-index: 2147483647;
     max-width: 320px;
     min-width: 250px;
-    border-left: 8px solid ${type === 'error' ? '#ff4b2b' : type === 'success' ? '#1d9bf0' : '#ffd700'};
+    border-left: 8px solid ${type === 'error' ? '#f4212e' : type === 'success' ? '#1d9bf0' : '#ffd700'};
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     animation: zerogptSlideIn 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
     display: block !important;
@@ -275,10 +245,7 @@ function showOverlay(message, type = "info") {
     `;
     reportBtn.onclick = () => {
       const info = extractTweetInfo(lastRightClickedElement);
-      chrome.runtime.sendMessage({
-        action: "manualReport",
-        ...info
-      });
+      chrome.runtime.sendMessage({ action: "manualReport", ...info });
       reportBtn.innerText = '✅ Reported to Registry';
       reportBtn.style.background = '#00ba7c';
       reportBtn.disabled = true;
@@ -289,7 +256,8 @@ function showOverlay(message, type = "info") {
     overlay.appendChild(content);
   }
 
-  const closeBtn = document.createElement('button');  closeBtn.innerText = '✕';
+  const closeBtn = document.createElement('button');
+  closeBtn.innerText = '✕';
   closeBtn.style.cssText = `
     position: absolute;
     top: 10px;
@@ -310,7 +278,6 @@ function showOverlay(message, type = "info") {
 
   overlay.appendChild(closeBtn);
   overlay.appendChild(title);
-  overlay.appendChild(content);
   document.body.appendChild(overlay);
 
   if (type !== 'error') {

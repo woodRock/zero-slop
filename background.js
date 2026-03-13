@@ -72,8 +72,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
   } else if (request.action === "manualReport") {
     storeSlopTweet(request.tweetId, request.text, 0, request.author, true);
+  } else if (request.action === "checkRegistry") {
+    checkRegistry(request.tweetId).then(data => {
+      if (data) {
+        chrome.tabs.sendMessage(sender.tab.id, {
+          action: "showResult",
+          data: { fakePercentage: data.ai_score, feedback_message: "From ZeroSlop Registry" },
+          tweetId: request.tweetId,
+          isAutoScan: true // Use autoScan style (badge only, no overlay)
+        });
+      }
+    });
   }
 });
+
+async function checkRegistry(tweetId) {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
+  
+  try {
+    const response = await fetch(url);
+    if (response.ok) {
+      const doc = await response.json();
+      // Map Firestore REST format back to simple object
+      const fields = doc.fields;
+      return {
+        ai_score: fields.ai_score?.doubleValue || fields.ai_score?.integerValue || 0,
+        status: fields.status?.stringValue
+      };
+    }
+  } catch (e) {
+    // Silently fail for background checks
+  }
+  return null;
+}
 
 async function performDetection(text, tabId, tweetId = null, isAutoScan = false, author = null) {
   const { zerogptApiKey } = await chrome.storage.local.get(['zerogptApiKey']);
@@ -109,9 +140,6 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
   }
 }
 
-/**
- * Uses Firestore REST API to store reports without external libraries
- */
 async function storeSlopTweet(tweetId, text, percentage, author, isManual = false) {
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
   
@@ -132,19 +160,16 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
 
   try {
     const response = await fetch(url, {
-      method: "PATCH", // Use PATCH to create or update (merge)
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields })
     });
 
     if (response.ok) {
-      console.log(`ZeroSlop: ${isManual ? 'Manual report' : 'Auto detection'} for ${tweetId} saved via REST.`);
-    } else {
-      const error = await response.text();
-      console.error("ZeroSlop: Firestore REST Error:", error);
+      console.log(`ZeroSlop: ${isManual ? 'Manual report' : 'Auto detection'} for ${tweetId} saved.`);
     }
   } catch (e) {
-    console.error("ZeroSlop: Network error saving to Firestore:", e);
+    console.error("ZeroSlop: Firestore error:", e);
   }
 }
 
