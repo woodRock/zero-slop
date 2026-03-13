@@ -252,7 +252,6 @@ async function updateGlobalStats() {
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
   
   try {
-    // Attempt to get current stats first
     const getResponse = await fetch(url);
     let totalCount = 0;
     
@@ -266,6 +265,7 @@ async function updateGlobalStats() {
       last_updated: { timestampValue: new Date().toISOString() }
     };
 
+    // Use a single PATCH with a full mask to ensure it works whether the doc exists or not
     await fetch(url + "?updateMask.fieldPaths=total_slops&updateMask.fieldPaths=last_updated", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },

@@ -38,7 +38,10 @@ function App() {
           let totalCount = documents.length;
           if (statsResponse.ok) {
             const statsData = await statsResponse.json();
-            totalCount = parseInt(statsData.fields.total_slops?.integerValue || totalCount);
+            // Use the actual field from the global doc
+            const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || 0);
+            // Use whichever is higher to prevent "dropping" the count while testing
+            totalCount = Math.max(remoteTotal, totalCount);
           }
 
           setStats({
