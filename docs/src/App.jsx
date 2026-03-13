@@ -33,16 +33,18 @@ function App() {
             accounts: new Set(documents.map(d => d.fields.author_handle?.stringValue)).size.toLocaleString()
           });
 
-          // Update Wall of Shame (Latest 3)
+          // Update Wall of Shame (Latest 3 with score > 15%)
           const recent = documents
-            .sort((a, b) => new Date(b.updateTime) - new Date(a.updateTime))
-            .slice(0, 3)
             .map(doc => ({
               name: doc.fields.author_name?.stringValue || "Unknown",
               handle: doc.fields.author_handle?.stringValue || "@anonymous",
               score: Math.round(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0),
-              pfp: doc.fields.author_pfp?.stringValue || "🤖"
-            }));
+              pfp: doc.fields.author_pfp?.stringValue || "🤖",
+              updateTime: doc.updateTime
+            }))
+            .filter(item => item.score > 15)
+            .sort((a, b) => new Date(b.updateTime) - new Date(a.updateTime))
+            .slice(0, 3);
           setWallOfShame(recent);
         }
       } catch (e) {
