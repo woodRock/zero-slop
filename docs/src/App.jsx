@@ -63,15 +63,60 @@ function App() {
       setSearchResults([]);
       return;
     }
-    const results = allDocs
-      .filter(doc => doc.fields.author_handle?.stringValue?.toLowerCase().includes(query))
-      .map(doc => ({
-        handle: doc.fields.author_handle?.stringValue,
-        score: doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0,
-        text: doc.fields.text?.stringValue || ""
-      }));
+    
+    // Aggregate by handle
+    const handleMap = {};
+    allDocs.forEach(doc => {
+      const handle = doc.fields.author_handle?.stringValue;
+      if (handle && handle.toLowerCase().includes(query)) {
+        if (!handleMap[handle]) {
+          handleMap[handle] = { handle, scores: [], count: 0 };
+        }
+        handleMap[handle].scores.push(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0);
+        handleMap[handle].count++;
+      }
+    });
+
+    const results = Object.values(handleMap).map(res => {
+      const avgScore = Math.round(res.scores.reduce((a, b) => a + b, 0) / res.count);
+      let label = "";
+      if (res.count > 5 && avgScore > 80) label = "Verified Slop Factory";
+      else if (avgScore > 70) label = "Likely Bot";
+      
+      return {
+        handle: res.handle,
+        score: avgScore,
+        count: res.count,
+        label
+      };
+    });
+
     setSearchResults(results);
   };
+
+  // Group by day for trends
+  const getTrendsData = () => {
+    const days = {};
+    const today = new Date();
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      days[dateStr] = 0;
+    }
+
+    allDocs.forEach(doc => {
+      const dateStr = doc.updateTime.split('T')[0];
+      if (days[dateStr] !== undefined) {
+        days[dateStr]++;
+      }
+    });
+
+    return Object.entries(days).reverse();
+  };
+
+  const trends = getTrendsData();
+  const maxTrend = Math.max(...trends.map(t => t[1]), 1);
 
   const Tweet = ({ author = "ZeroSlop", handle = "zeroslop_ai", children, verified = true, media = null }) => (
     <div className="tweet-card">
@@ -281,13 +326,35 @@ function App() {
           {searchResults.length > 0 && (
             <div className="search-results" style={{ background: 'var(--twitter-dark-gray)', padding: '10px', borderRadius: '12px', marginTop: '8px' }}>
               {searchResults.slice(0, 5).map((res, i) => (
-                <div key={i} style={{ marginBottom: '8px', fontSize: '0.85rem' }}>
+                <div key={i} style={{ marginBottom: '12px', fontSize: '0.85rem' }}>
                   <div style={{ fontWeight: 'bold' }}>{res.handle}</div>
-                  <div style={{ color: '#f4212e' }}>{Math.round(res.score)}% AI Score</div>
+                  <div style={{ color: '#f4212e' }}>{Math.round(res.score)}% AI Score ({res.count} detections)</div>
+                  {res.label && <div style={{ fontSize: '0.7rem', background: '#f4212e', color: 'white', display: 'inline-block', padding: '1px 5px', borderRadius: '4px', marginTop: '3px' }}>{res.label}</div>}
                 </div>
               ))}
             </div>
           )}
+        </div>
+
+        <div className="trending-box">
+          <div className="trending-title">Slop Trends (Last 7 Days)</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '60px', padding: '10px 5px 0' }}>
+            {trends.map(([date, count], i) => (
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+                <div style={{ 
+                  width: '10px', 
+                  height: `${(count / maxTrend) * 40}px`, 
+                  background: '#1d9bf0', 
+                  borderRadius: '2px 2px 0 0',
+                  minHeight: count > 0 ? '4px' : '0'
+                }}></div>
+                <div style={{ fontSize: '0.5rem', color: '#71767b', marginTop: '4px' }}>{date.split('-')[2]}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#71767b', padding: '5px 10px', textAlign: 'center' }}>
+            Daily slop detections are {trends[6][1] > trends[5][1] ? 'up' : 'down'} today
+          </div>
         </div>
 
         <div className="slop-counter-box">

@@ -108,14 +108,82 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (data) {
         chrome.tabs.sendMessage(sender.tab.id, {
           action: "showResult",
-          data: { fakePercentage: data.ai_score, feedback_message: "From ZeroSlop Registry" },
+          data: { 
+            fakePercentage: data.ai_score, 
+            feedback_message: "From ZeroSlop Registry",
+            upvotes: data.upvotes,
+            downvotes: data.downvotes
+          },
           tweetId: request.tweetId,
           isAutoScan: true
         });
       }
     });
+  } else if (request.action === "checkProfileSlop") {
+    checkProfileSlop(request.handle).then(data => {
+      if (data && data.highSlopCount > 0) {
+        chrome.tabs.sendMessage(sender.tab.id, {
+          action: "showProfileWarning",
+          handle: request.handle,
+          highSlopCount: data.highSlopCount,
+          avgScore: data.avgScore
+        });
+      }
+    });
   }
 });
+
+async function checkProfileSlop(handle) {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:runQuery?key=${FIREBASE_CONFIG.apiKey}`;
+  const query = {
+    structuredQuery: {
+      from: [{ collectionId: "slop_registry" }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: "author_handle" },
+          op: "EQUAL",
+          value: { stringValue: handle }
+        }
+      }
+    }
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(query)
+    });
+
+    if (response.ok) {
+      const results = await response.json();
+      const docs = results.filter(r => r.document).map(r => r.document);
+      
+      const highSlopDocs = docs.filter(doc => {
+        const score = doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0;
+        return score > 70;
+      });
+
+      if (highSlopDocs.length > 0) {
+        const totalScore = docs.reduce((acc, doc) => acc + (doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0), 0);
+        return {
+          highSlopCount: highSlopDocs.length,
+          avgScore: Math.round(totalScore / docs.length)
+        };
+      }
+    }
+  } catch (e) {
+    console.error("ZeroSlop: Error checking profile slop", e);
+  }
+  return null;
+}
+
+function incrementSlopsCaught() {
+  chrome.storage.local.get(['slopsCaught'], (result) => {
+    const current = result.slopsCaught || 0;
+    chrome.storage.local.set({ slopsCaught: current + 1 });
+  });
+}
 
 async function checkRegistry(tweetId) {
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
@@ -126,7 +194,9 @@ async function checkRegistry(tweetId) {
       const fields = doc.fields;
       return {
         ai_score: fields.ai_score?.doubleValue || fields.ai_score?.integerValue || 0,
-        status: fields.status?.stringValue
+        status: fields.status?.stringValue,
+        upvotes: parseInt(fields.upvotes?.integerValue || 0),
+        downvotes: parseInt(fields.downvotes?.integerValue || 0)
       };
     }
   } catch (e) {}
@@ -152,6 +222,10 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
         const percentage = result.data.fakePercentage || 0;
         saveToHistory(text, percentage, result.data.textWords);
         
+        if (percentage > 70) {
+          incrementSlopsCaught();
+        }
+
         if (tweetId) {
           storeSlopTweet(tweetId, text, percentage, author, false);
         }
@@ -184,6 +258,12 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
 
   if (percentage > 0) {
     fields.ai_score = { doubleValue: parseFloat(percentage) };
+    if (percentage > 70) {
+      incrementSlopsCaught();
+    }
+  } else if (isManual) {
+    // If manual report with no score yet, still count it as a "catch"
+    incrementSlopsCaught();
   }
 
   if (isManual) fields.manual_report = { booleanValue: true };

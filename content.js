@@ -42,12 +42,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       showOverlay(message, "success", data.fakePercentage);
     }
     
-    injectBadge(request.tweetId || getTweetContainer(lastRightClickedElement), data.fakePercentage || 0);
+    injectBadge(request.tweetId || getTweetContainer(lastRightClickedElement), data.fakePercentage || 0, data.upvotes || 0, data.downvotes || 0);
   } else if (request.action === "showError") {
     showOverlay(request.message, "error");
+  } else if (request.action === "showProfileWarning") {
+    injectProfileBanner(request.handle, request.highSlopCount, request.avgScore);
   }
   return true; 
 });
+
+function injectProfileBanner(handle, highSlopCount, avgScore) {
+  const existing = document.getElementById('zerogpt-profile-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'zerogpt-profile-banner';
+  banner.style.cssText = `
+    background: #f4212e;
+    color: white;
+    padding: 12px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 9999;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  `;
+  banner.innerHTML = `
+    <span>⚠️ SLOP WARNING: ${handle} has ${highSlopCount} high-slop detections (Avg: ${avgScore}% AI)</span>
+    <button id="close-slop-banner" style="background: rgba(255,255,255,0.2); border: none; color: white; border-radius: 4px; padding: 2px 8px; cursor: pointer;">Dismiss</button>
+  `;
+
+  document.body.prepend(banner);
+  banner.querySelector('#close-slop-banner').onclick = () => banner.remove();
+}
 
 function getTweetContainer(element) {
   if (!element) return null;
@@ -188,7 +221,7 @@ function extractProfileInfo(element) {
   };
 }
 
-function injectBadge(tweetIdOrContainer, percentage) {
+function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0) {
   let container;
   if (typeof tweetIdOrContainer === 'string') {
     container = document.querySelector(`article a[href*="/status/${tweetIdOrContainer}"]`)?.closest('article') ||
@@ -198,6 +231,12 @@ function injectBadge(tweetIdOrContainer, percentage) {
   }
 
   if (!container || container.querySelector('.zerogpt-badge')) return;
+
+  // Task 6: Registry Auto-Cleanup
+  // Ignore or hide badges where downvotes > upvotes + 2
+  if (downvotes > upvotes + 2) {
+    return;
+  }
 
   const badge = document.createElement('div');
   badge.className = 'zerogpt-badge';
@@ -223,7 +262,7 @@ function injectBadge(tweetIdOrContainer, percentage) {
     cursor: help;
     border: 1px solid rgba(255,255,255,0.2);
   `;
-  badge.innerHTML = `AI: ${percentage}% <span class="vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
+  badge.innerHTML = `AI: ${percentage}% [↑${upvotes} | ↓${downvotes}] <span class="vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
   badge.title = 'ZeroSlop Registry Score';
 
   badge.querySelector('.vote-up').addEventListener('click', (e) => {
@@ -273,7 +312,33 @@ function injectBadge(tweetIdOrContainer, percentage) {
 
 function initObservers() {
   if (window.zerogptObserver) window.zerogptObserver.disconnect();
+
+  // Profile Warning Detection
+  const checkProfileWarning = () => {
+    const path = window.location.pathname;
+    const parts = path.split('/').filter(Boolean);
+    if (parts.length === 1 && !['home', 'explore', 'notifications', 'messages', 'search', 'settings'].includes(parts[0])) {
+      const handle = '@' + parts[0];
+      chrome.runtime.sendMessage({ action: "checkProfileSlop", handle: handle });
+    }
+  };
   
+  // Initial check
+  checkProfileWarning();
+  
+  // Re-check on navigation (Twitter is a SPA)
+  let lastPath = window.location.pathname;
+  const navObserver = new MutationObserver(() => {
+    if (window.location.pathname !== lastPath) {
+      lastPath = window.location.pathname;
+      checkProfileWarning();
+      // Remove any existing banners on new page
+      const existing = document.getElementById('zerogpt-profile-banner');
+      if (existing) existing.remove();
+    }
+  });
+  navObserver.observe(document.head, { childList: true, subtree: true });
+
   window.zerogptObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {

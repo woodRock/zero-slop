@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const exportBtn = document.getElementById('exportBtn');
   const clearHistoryBtn = document.getElementById('clearHistoryBtn');
   const historyList = document.getElementById('historyList');
+  const slopsCaughtCountEl = document.getElementById('slopsCaughtCount');
 
   const repoUrl = 'https://github.com/woodRock/zero-slop';
   const rawManifestUrl = 'https://raw.githubusercontent.com/woodRock/zero-slop/main/manifest.json';
@@ -26,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load state
-  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'autoHide', 'hideThreshold', 'scanHistory'], (result) => {
+  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'autoHide', 'hideThreshold', 'scanHistory', 'slopsCaught'], (result) => {
     if (result.zerogptApiKey) {
       apiKeyInput.value = result.zerogptApiKey;
       statusEl.textContent = 'API Key is already set.';
@@ -41,6 +42,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (result.hideThreshold) {
       thresholdSlider.value = result.hideThreshold;
       thresholdVal.textContent = result.hideThreshold;
+    }
+    if (result.slopsCaught) {
+      slopsCaughtCountEl.textContent = result.slopsCaught;
     }
     renderHistory(result.scanHistory || []);
   });
