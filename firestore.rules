@@ -3,23 +3,29 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Slop Registry: Publicly readable, restricted writes
+    // Slop Registry: Publicly readable, community-reported registry
     match /slop_registry/{tweetId} {
       
       // Allow everyone to read so the extension can show badges/hide tweets
       allow read: if true;
       
-      // Allow creation of new slop reports with basic validation
-      // This prevents users from overwriting existing data or injecting garbage
-      allow create: if 
+      // Allow creation AND updates (for multiple reports on the same tweet)
+      // This is necessary for the SponsorBlock-style crowdsourced system
+      allow write: if 
+        // 1. Ensure the ID in the data matches the document ID
         request.resource.data.tweet_id == tweetId &&
-        request.resource.data.ai_score >= 0 &&
-        request.resource.data.ai_score <= 100 &&
-        request.resource.data.status == "pending";
+        
+        // 2. Initial status must always be pending
+        request.resource.data.status == "pending" &&
+        
+        // 3. Validation for the AI Score field (if present)
+        // If the score is missing (manual report), it's allowed.
+        // If it's present (auto-scan), it must be between 0 and 100.
+        (!('ai_score' in request.resource.data) || 
+         (request.resource.data.ai_score >= 0 && request.resource.data.ai_score <= 100));
 
-      // Disable public updates and deletes to prevent database wiping/tampering
-      // Only the admin (via Firebase Console) can modify or remove entries
-      allow update: if false;
+      // Strictly prohibit DELETING by the public
+      // Only the admin (via Firebase Console) can remove entries
       allow delete: if false;
     }
 
