@@ -182,6 +182,20 @@ header.sticky-header h2 {
   margin-bottom: 12px;
 }
 
+.tweet-media {
+  margin-top: 12px;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--twitter-border);
+  line-height: 0;
+}
+
+.tweet-media img, .tweet-media video {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 .tweet-actions {
   display: flex;
   justify-content: space-between;

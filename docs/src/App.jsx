@@ -3,7 +3,7 @@ import './App.css'
 function App() {
   const year = new Date().getFullYear();
 
-  const Tweet = ({ author = "ZeroSlop", handle = "zeroslop_ai", children, verified = true }) => (
+  const Tweet = ({ author = "ZeroSlop", handle = "zeroslop_ai", children, verified = true, media = null }) => (
     <div className="tweet-card">
       <div className="avatar">{author[0]}</div>
       <div className="tweet-content">
@@ -15,6 +15,15 @@ function App() {
         <div className="tweet-body">
           {children}
         </div>
+        {media && (
+          <div className="tweet-media">
+            {media.type === 'video' ? (
+              <video src={media.src} controls autoPlay muted loop />
+            ) : (
+              <img src={media.src} alt="Tweet media" />
+            )}
+          </div>
+        )}
         <div className="tweet-actions">
           <div className="action-item"><span>💬</span> 12</div>
           <div className="action-item"><span>🔁</span> 45</div>
@@ -48,7 +57,9 @@ function App() {
           <h2>Home</h2>
         </header>
 
-        <Tweet>
+        <Tweet 
+          media={{ type: 'video', src: '/zero-slop/zero-slop-usage-video.mov' }}
+        >
           <h2>Welcome to ZeroSlop</h2>
           <p>Instantly detect AI-generated tweets on Twitter (X) using the ZeroGPT Business API. Stop the slop, see the truth. 🔍✨</p>
           <div className="features-grid">
@@ -64,7 +75,9 @@ function App() {
         </Tweet>
 
         <section id="features">
-          <Tweet>
+          <Tweet
+            media={{ type: 'image', src: '/zero-slop/zero-slop-right-click.png' }}
+          >
             <h2>Why ZeroSlop?</h2>
             <p>The timeline is being flooded with AI-generated slop. Our extension integrates natively into X to help you identify bot-like behavior instantly.</p>
             <ul>
@@ -86,7 +99,9 @@ function App() {
         </section>
 
         <section id="setup">
-          <Tweet>
+          <Tweet
+            media={{ type: 'image', src: '/zero-slop/zero-slop-analyzing.png' }}
+          >
             <h2>Initial Setup</h2>
             <p>Get your API Key from <a href="https://www.zerogpt.com/dashboard" target="_blank" className="btn-inline">ZeroGPT Dashboard</a>.</p>
             <p>Add credits, paste the key into the extension popup, and you're ready to go!</p>
@@ -94,7 +109,9 @@ function App() {
         </section>
 
         <section id="usage">
-          <Tweet>
+          <Tweet
+            media={{ type: 'image', src: '/zero-slop/zero-slop-result.png' }}
+          >
             <h2>How to Use</h2>
             <p>Right-click any tweet and select <strong>Check with ZeroGPT</strong>. Our AI agent will scan the text and give you a probability score in the corner of your screen.</p>
           </Tweet>
