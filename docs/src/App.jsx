@@ -67,8 +67,9 @@ function App() {
         <nav>
           <a href="#" className="nav-item active"><span className="nav-text">Home</span></a>
           <a href="#features" className="nav-item"><span className="nav-text">Features</span></a>
+          <a href="#registry" className="nav-item"><span className="nav-text">Registry</span></a>
+          <a href="#wanted" className="nav-item"><span className="nav-text">Wanted</span></a>
           <a href="#installation" className="nav-item"><span className="nav-text">Install</span></a>
-          <a href="#setup" className="nav-item"><span className="nav-text">Setup</span></a>
           <a href="#privacy" className="nav-item"><span className="nav-text">Privacy</span></a>
         </nav>
         <a href="#installation" className="post-btn">Install Now</a>
@@ -103,11 +104,29 @@ function App() {
           <p>Check out ZeroSlop in action! Seamlessly integrated into your X timeline. 👇</p>
         </Tweet>
 
+        <section id="registry">
+          <Tweet
+            media={{ type: 'video', src: `${baseUrl}zero-slop-self-reporting.mov` }}
+          >
+            <h2>Community Registry</h2>
+            <p>ZeroSlop is powered by the community. When one user scans a tweet, the result is saved for everyone. Watch how it identifies slop in real-time on a busy thread! 🛡️🤝</p>
+          </Tweet>
+        </section>
+
+        <section id="wanted">
+          <Tweet
+            media={{ type: 'video', src: `${baseUrl}zero-slop-wanted-posters.mov` }}
+          >
+            <h2>Wanted Posters</h2>
+            <p>Expose the slop-posters with style! Generate a custom "WANTED" poster for any AI-detected tweet and share it instantly to your clipboard. 🖼️🎨</p>
+          </Tweet>
+        </section>
+
         <section id="features">
           <Tweet
             media={{ type: 'image', src: `${baseUrl}zero-slop-right-click.png` }}
           >
-            <h2>Why ZeroSlop?</h2>
+            <h2>Native Integration</h2>
             <p>The timeline is being flooded with AI-generated slop. Our extension integrates natively into X to help you identify bot-like behavior instantly.</p>
             <ul>
               <li>Native-feeling Twitter UI</li>
