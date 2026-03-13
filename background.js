@@ -247,14 +247,13 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
     console.error("ZeroSlop: Fetch error:", error);
   }
 }
-
 async function updateGlobalStats() {
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
-  
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}&updateMask.fieldPaths=total_slops&updateMask.fieldPaths=last_updated`;
+
   try {
-    const getResponse = await fetch(url);
+    const getResponse = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`);
     let totalCount = 0;
-    
+
     if (getResponse.ok) {
       const doc = await getResponse.json();
       totalCount = parseInt(doc.fields.total_slops?.integerValue || 0);
@@ -265,8 +264,7 @@ async function updateGlobalStats() {
       last_updated: { timestampValue: new Date().toISOString() }
     };
 
-    // Use a single PATCH with a full mask to ensure it works whether the doc exists or not
-    await fetch(url + "?updateMask.fieldPaths=total_slops&updateMask.fieldPaths=last_updated", {
+    await fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields })
