@@ -67,7 +67,7 @@ function extractTweetInfo(element) {
       
       const links = userNameDiv.querySelectorAll('a');
       for (const link of links) {
-        if (link.innerText.startsWith('@')) {
+        if (link.innerText && link.innerText.startsWith('@')) {
           author.handle = link.innerText;
           break;
         }
@@ -189,6 +189,90 @@ function initObservers() {
 // Start observing
 initObservers();
 
+async function generateWantedPoster(author, percentage) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = 600;
+  canvas.height = 800;
+
+  // 1. Background (Parchment color)
+  ctx.fillStyle = '#f4e4bc';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // 2. Borders
+  ctx.strokeStyle = '#5d4037';
+  ctx.lineWidth = 20;
+  ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
+
+  // 3. Header
+  ctx.fillStyle = '#5d4037';
+  ctx.font = 'bold 80px "Courier New", Courier, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('WANTED', canvas.width / 2, 120);
+  
+  ctx.font = 'bold 30px "Courier New", Courier, monospace';
+  ctx.fillText('FOR SPREADING AI SLOP', canvas.width / 2, 160);
+
+  // 4. Profile Picture
+  if (author.pfp) {
+    try {
+      const img = new Image();
+      img.crossOrigin = "anonymous"; // Try to handle CORS
+      img.src = author.pfp;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = resolve; // Continue even if image fails
+      });
+      
+      // Draw a frame for the PFP
+      ctx.fillStyle = '#d7ccc8';
+      ctx.fillRect(150, 200, 300, 300);
+      ctx.drawImage(img, 150, 200, 300, 300);
+      ctx.strokeStyle = '#5d4037';
+      ctx.lineWidth = 5;
+      ctx.strokeRect(150, 200, 300, 300);
+    } catch (e) {
+      console.error("ZeroSlop: Failed to draw PFP on poster", e);
+    }
+  }
+
+  // 5. Author Name
+  ctx.fillStyle = '#5d4037';
+  ctx.font = 'bold 40px "Courier New", Courier, monospace';
+  ctx.fillText(author.name || 'Unknown Slop-Poster', canvas.width / 2, 560);
+  ctx.font = 'italic 30px "Courier New", Courier, monospace';
+  ctx.fillText(author.handle || '@anonymous', canvas.width / 2, 610);
+
+  // 6. The Stamp (Big Red AI SLOP)
+  ctx.save();
+  ctx.translate(canvas.width / 2, 400);
+  ctx.rotate(-0.3);
+  
+  ctx.strokeStyle = 'rgba(244, 33, 46, 0.8)';
+  ctx.lineWidth = 15;
+  ctx.strokeRect(-250, -60, 500, 120);
+  
+  ctx.fillStyle = 'rgba(244, 33, 46, 0.8)';
+  ctx.font = 'bold 70px Arial';
+  ctx.fillText('AI SLOP', 0, 15);
+  
+  ctx.font = 'bold 30px Arial';
+  ctx.fillText(`DETECTED: ${percentage}%`, 0, 45);
+  ctx.restore();
+
+  // 7. Footer Branding
+  ctx.fillStyle = '#5d4037';
+  ctx.font = 'bold 20px Arial';
+  ctx.fillText('STAMPED BY ZEROSLOP.GITHUB.IO', canvas.width / 2, 750);
+
+  return canvas.toBlob((blob) => {
+    const item = new ClipboardItem({ "image/png": blob });
+    navigator.clipboard.write([item]).then(() => {
+      alert("Wanted Poster copied to clipboard! Share the truth. 🛡️");
+    });
+  });
+}
+
 function showOverlay(message, type = "info", currentAiScore = 0) {
   const existing = document.getElementById('zerogpt-overlay');
   if (existing) existing.remove();
@@ -228,36 +312,69 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
   content.style.lineHeight = '1.4';
   content.style.color = '#333';
 
-  if (type === 'success' && !message.includes('Reported')) {
-    const reportBtn = document.createElement('button');
-    reportBtn.innerText = '🚩 Report as AI Slop';
-    reportBtn.style.cssText = `
-      margin-top: 15px;
-      background: #f4212e;
+  overlay.appendChild(title);
+  overlay.appendChild(content);
+
+  if (type === 'success') {
+    const btnContainer = document.createElement('div');
+    btnContainer.style.display = 'flex';
+    btnContainer.style.flexDirection = 'column';
+    btnContainer.style.gap = '8px';
+    btnContainer.style.marginTop = '15px';
+
+    const info = extractTweetInfo(lastRightClickedElement);
+
+    // 1. Report Button
+    if (!message.includes('Reported')) {
+      const reportBtn = document.createElement('button');
+      reportBtn.innerText = '🚩 Report as AI Slop';
+      reportBtn.style.cssText = `
+        background: #f4212e;
+        color: white;
+        border: none;
+        padding: 10px;
+        border-radius: 20px;
+        cursor: pointer;
+        font-weight: bold;
+        width: 100%;
+        font-size: 0.9rem;
+      `;
+      reportBtn.onclick = () => {
+        chrome.runtime.sendMessage({ 
+          action: "manualReport", 
+          aiScore: currentAiScore,
+          ...info 
+        });
+        reportBtn.innerText = '✅ Reported to Registry';
+        reportBtn.style.background = '#00ba7c';
+        reportBtn.disabled = true;
+      };
+      btnContainer.appendChild(reportBtn);
+    }
+
+    // 2. Poster Button
+    const posterBtn = document.createElement('button');
+    posterBtn.innerText = '🖼️ Generate Wanted Poster';
+    posterBtn.style.cssText = `
+      background: #1d9bf0;
       color: white;
       border: none;
-      padding: 8px 12px;
+      padding: 10px;
       border-radius: 20px;
       cursor: pointer;
       font-weight: bold;
       width: 100%;
       font-size: 0.9rem;
     `;
-    reportBtn.onclick = () => {
-      const info = extractTweetInfo(lastRightClickedElement);
-      chrome.runtime.sendMessage({ 
-        action: "manualReport", 
-        aiScore: currentAiScore,
-        ...info 
+    posterBtn.onclick = () => {
+      posterBtn.innerText = '⌛ Generating...';
+      generateWantedPoster(info.author, currentAiScore).then(() => {
+        posterBtn.innerText = '📋 Copied to Clipboard!';
+        setTimeout(() => posterBtn.innerText = '🖼️ Generate Wanted Poster', 3000);
       });
-      reportBtn.innerText = '✅ Reported to Registry';
-      reportBtn.style.background = '#00ba7c';
-      reportBtn.disabled = true;
     };
-    overlay.appendChild(content);
-    overlay.appendChild(reportBtn);
-  } else {
-    overlay.appendChild(content);
+    btnContainer.appendChild(posterBtn);
+    overlay.appendChild(btnContainer);
   }
 
   const closeBtn = document.createElement('button');
@@ -281,11 +398,10 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
   closeBtn.onclick = () => overlay.remove();
 
   overlay.appendChild(closeBtn);
-  overlay.appendChild(title);
   document.body.appendChild(overlay);
 
   if (type !== 'error') {
-    const timeout = type === 'success' ? 5000 : 4000;
+    const timeout = type === 'success' ? 8000 : 4000;
     setTimeout(() => {
       if (overlay.parentNode) {
         overlay.style.opacity = '0';
