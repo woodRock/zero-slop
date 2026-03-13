@@ -101,11 +101,22 @@ function App() {
           <p>If you find ZeroSlop useful, you can support its development at this address:</p>
           <pre><code>GY4453uGkG6QKbSU7YtduxhRqD4CETBaWr4qu5D3pump</code></pre>
         </section>
+
+        <section id="privacy">
+          <h2>Privacy Policy</h2>
+          <p>ZeroSlop is built with a privacy-first mindset. We do not collect or store any of your personal data on our servers.</p>
+          <ul>
+            <li><strong>Local Storage:</strong> Your API key and settings are stored only in your browser.</li>
+            <li><strong>Encrypted Transit:</strong> Tweet text is sent securely to the ZeroGPT API via HTTPS for analysis.</li>
+            <li><strong>No Tracking:</strong> We do not use any cookies or tracking scripts.</li>
+          </ul>
+          <p>For more details, view our <a href="https://github.com/woodj/zero-slop/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer">full Privacy Policy on GitHub</a>.</p>
+        </section>
       </main>
 
       <footer>
         <div className="container">
-          <p>&copy; {new Date().getFullYear()} ZeroSlop. All rights reserved.</p>
+          <p>&copy; {new Date().getFullYear()} ZeroSlop. All rights reserved. | <a href="#privacy">Privacy Policy</a></p>
         </div>
       </footer>
     </div>
