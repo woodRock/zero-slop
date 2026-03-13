@@ -258,8 +258,38 @@ function showOverlay(message, type = "info") {
   content.style.lineHeight = '1.4';
   content.style.color = '#333';
 
-  const closeBtn = document.createElement('button');
-  closeBtn.innerText = '✕';
+  if (type === 'success' && !message.includes('Reported')) {
+    const reportBtn = document.createElement('button');
+    reportBtn.innerText = '🚩 Report as AI Slop';
+    reportBtn.style.cssText = `
+      margin-top: 15px;
+      background: #f4212e;
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: bold;
+      width: 100%;
+      font-size: 0.9rem;
+    `;
+    reportBtn.onclick = () => {
+      const info = extractTweetInfo(lastRightClickedElement);
+      chrome.runtime.sendMessage({
+        action: "manualReport",
+        ...info
+      });
+      reportBtn.innerText = '✅ Reported to Registry';
+      reportBtn.style.background = '#00ba7c';
+      reportBtn.disabled = true;
+    };
+    overlay.appendChild(content);
+    overlay.appendChild(reportBtn);
+  } else {
+    overlay.appendChild(content);
+  }
+
+  const closeBtn = document.createElement('button');  closeBtn.innerText = '✕';
   closeBtn.style.cssText = `
     position: absolute;
     top: 10px;
