@@ -2,11 +2,12 @@ import './App.css'
 
 function App() {
   const year = new Date().getFullYear();
+  const baseUrl = import.meta.env.BASE_URL;
 
   const Tweet = ({ author = "ZeroSlop", handle = "zeroslop_ai", children, verified = true, media = null }) => (
     <div className="tweet-card">
       <div className="avatar">
-        <img src="/zero-slop/icon.jpg" alt="ZeroSlop Icon" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+        <img src={`${baseUrl}icon.jpg`} alt="ZeroSlop Icon" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
       </div>
       <div className="tweet-content">
         <div className="tweet-header">
@@ -20,7 +21,11 @@ function App() {
         {media && (
           <div className="tweet-media">
             {media.type === 'video' ? (
-              <video src={media.src} controls autoPlay muted loop />
+              <video controls autoPlay muted loop playsInline style={{ width: '100%', display: 'block' }}>
+                <source src={media.src} type="video/quicktime" />
+                <source src={media.src.replace('.mov', '.mp4')} type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
             ) : (
               <img src={media.src} alt="Tweet media" />
             )}
@@ -42,7 +47,7 @@ function App() {
       <aside className="sidebar-left">
         <div className="logo-container">
           <a href="#" className="logo">
-            <img src="/zero-slop/icon.jpg" alt="Logo" style={{ width: '32px', height: '32px', borderRadius: '50%' }} />
+            <img src={`${baseUrl}icon.jpg`} alt="Logo" style={{ width: '32px', height: '32px', borderRadius: '50%' }} />
           </a>
         </div>
         <nav>
@@ -62,7 +67,7 @@ function App() {
         </header>
 
         <Tweet 
-          media={{ type: 'image', src: '/zero-slop/banner.jpg' }}
+          media={{ type: 'image', src: `${baseUrl}banner.jpg` }}
         >
           <h2>Welcome to ZeroSlop</h2>
           <p>Instantly detect AI-generated tweets on Twitter (X) using the ZeroGPT Business API. Stop the slop, see the truth. 🔍✨</p>
@@ -79,14 +84,14 @@ function App() {
         </Tweet>
 
         <Tweet 
-          media={{ type: 'video', src: '/zero-slop/zero-slop-usage-video.mov' }}
+          media={{ type: 'video', src: `${baseUrl}zero-slop-usage-video.mov` }}
         >
           <p>Check out ZeroSlop in action! Seamlessly integrated into your X timeline. 👇</p>
         </Tweet>
 
         <section id="features">
           <Tweet
-            media={{ type: 'image', src: '/zero-slop/zero-slop-right-click.png' }}
+            media={{ type: 'image', src: `${baseUrl}zero-slop-right-click.png` }}
           >
             <h2>Why ZeroSlop?</h2>
             <p>The timeline is being flooded with AI-generated slop. Our extension integrates natively into X to help you identify bot-like behavior instantly.</p>
@@ -110,7 +115,7 @@ function App() {
 
         <section id="setup">
           <Tweet
-            media={{ type: 'image', src: '/zero-slop/zero-slop-analyzing.png' }}
+            media={{ type: 'image', src: `${baseUrl}zero-slop-analyzing.png` }}
           >
             <h2>Initial Setup</h2>
             <p>Get your API Key from <a href="https://www.zerogpt.com/dashboard" target="_blank" className="btn-inline">ZeroGPT Dashboard</a>.</p>
@@ -120,7 +125,7 @@ function App() {
 
         <section id="usage">
           <Tweet
-            media={{ type: 'image', src: '/zero-slop/zero-slop-result.png' }}
+            media={{ type: 'image', src: `${baseUrl}zero-slop-result.png` }}
           >
             <h2>How to Use</h2>
             <p>Right-click any tweet and select <strong>Check with ZeroGPT</strong>. Our AI agent will scan the text and give you a probability score in the corner of your screen.</p>
