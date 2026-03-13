@@ -4,7 +4,7 @@
 
 **ZeroSlop** is an open-source Chrome extension designed to identify and expose AI-generated "slop" on Twitter (X). Built with a community-first ethos, it turns detection into a collective effort to keep the timeline human.
 
-[**Download Latest Version**](https://github.com/woodrock/zero-slop/raw/main/dist/zero-slop-extension.zip) | [**Official Website**](https://woodrock.github.io/zero-slop/)
+[**Add to Chrome**](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab?utm_source=item-share-cb) | [**Official Website**](https://woodrock.github.io/zero-slop/)
 
 ---
 
@@ -47,13 +47,21 @@ ZeroSlop combines the **ZeroGPT Business API** with a high-performance **Firesto
 
 ## 📥 Installation
 
-### 1. Download & Extract
-[**Download zero-slop-extension.zip**](https://github.com/woodrock/zero-slop/raw/main/dist/zero-slop-extension.zip) and extract it to a folder on your computer.
+Simply add ZeroSlop to your browser from the Chrome Web Store:
 
-### 2. Load into Chrome
-Follow the visual guide below to enable Developer Mode and load the unpacked extension:
+[**Add to Chrome**](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab?utm_source=item-share-cb)
 
-![Installation Guide](docs/public/installation-guide.jpeg)
+---
+
+## 🔑 Configuration (Optional)
+
+To perform new scans, you can add your own **ZeroGPT Business API Key**:
+
+1. [**Get an API Key from ZeroGPT**](https://zerogpt.com) (Purchase credits as needed).
+2. Open the ZeroSlop extension popup.
+3. Paste your key into the **API Key** field and click **Save**.
+
+*Note: Previously scanned tweets are cached in our Firestore Registry and can be viewed by all users for free.*
 
 ---
 

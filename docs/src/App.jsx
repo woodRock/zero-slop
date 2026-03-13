@@ -283,23 +283,27 @@ function App() {
         </section>
 
         <section id="installation">
-          <Tweet media={{ type: 'image', src: `${baseUrl}installation-guide.jpeg` }}>
-            <h2>Installation Guide</h2>
-            <p>Choose your preferred way to install ZeroSlop:</p>
-            <div style={{ marginBottom: '20px' }}>
-              <h3>Option 1: Direct Download (Easiest)</h3>
-              <p>1. <a href="https://github.com/woodrock/zero-slop/raw/main/zero-slop-extension.zip" className="btn-inline" style={{ fontWeight: 'bold' }}>Download zero-slop-extension.zip</a></p>
-              <p>2. Extract the ZIP file to a folder on your computer.</p>
+          <Tweet media={{ type: 'image', src: `${baseUrl}zero-slop-result.png` }}>
+            <h2>Installation</h2>
+            <p>Simply add ZeroSlop to your browser from the Chrome Web Store:</p>
+            <div style={{ margin: '20px 0' }}>
+              <a href="https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab?utm_source=item-share-cb" 
+                 target="_blank" 
+                 className="btn-inline" 
+                 style={{ fontWeight: 'bold', padding: '10px 20px', backgroundColor: '#1d9bf0', color: 'white', borderRadius: '20px', textDecoration: 'none' }}>
+                Add to Chrome
+              </a>
             </div>
-            <div style={{ marginBottom: '20px' }}>
-              <h3>Option 2: Developers (Git)</h3>
-              <p>1. Clone: <code>git clone https://github.com/woodrock/zero-slop.git</code></p>
-            </div>
-            <div style={{ borderTop: '1px solid #2f3336', paddingTop: '15px' }}>
-              <h3>Final Steps</h3>
-              <p>1. Open <code>chrome://extensions/</code></p>
-              <p>2. Enable <strong>Developer mode</strong></p>
-              <p>3. Click <strong>Load unpacked</strong> and select the <code>zero-slop</code> folder.</p>
+            
+            <div style={{ borderTop: '1px solid #2f3336', paddingTop: '15px', marginTop: '20px' }}>
+              <h3>Optional: Configuration</h3>
+              <p>To perform new scans, you can add your own <strong>ZeroGPT Business API Key</strong>:</p>
+              <p>1. <a href="https://zerogpt.com" target="_blank" style={{ color: '#1d9bf0' }}>Get an API Key from ZeroGPT</a> (and purchase credits as needed).</p>
+              <p>2. Open the ZeroSlop extension popup.</p>
+              <p>3. Paste your key and click <strong>Save</strong>.</p>
+              <p style={{ fontStyle: 'italic', marginTop: '10px', fontSize: '0.9em', color: '#71767b' }}>
+                Note: Previously scanned tweets are cached in our registry and are visible to everyone for free.
+              </p>
             </div>
           </Tweet>
         </section>
