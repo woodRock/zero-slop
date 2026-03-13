@@ -1,0 +1,31 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Slop Registry: Publicly readable, restricted writes
+    match /slop_registry/{tweetId} {
+      
+      // Allow everyone to read so the extension can show badges/hide tweets
+      allow read: if true;
+      
+      // Allow creation of new slop reports with basic validation
+      // This prevents users from overwriting existing data or injecting garbage
+      allow create: if 
+        request.resource.data.tweet_id == tweetId &&
+        request.resource.data.ai_score >= 0 &&
+        request.resource.data.ai_score <= 100 &&
+        request.resource.data.status == "pending";
+
+      // Disable public updates and deletes to prevent database wiping/tampering
+      // Only the admin (via Firebase Console) can modify or remove entries
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Default: Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
