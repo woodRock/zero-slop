@@ -22,17 +22,29 @@ function App() {
   useEffect(() => {
     const fetchRegistryData = async () => {
       try {
+        // 1. Fetch Global Stats
+        const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
+        const statsResponse = await fetch(statsUrl);
+        
+        // 2. Fetch Recent Documents for Wall of Shame & Search
         const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=100`;
         const response = await fetch(url);
+        
         if (response.ok) {
           const data = await response.json();
           const documents = data.documents || [];
           setAllDocs(documents);
           
+          let totalCount = documents.length;
+          if (statsResponse.ok) {
+            const statsData = await statsResponse.json();
+            totalCount = parseInt(statsData.fields.total_slops?.integerValue || totalCount);
+          }
+
           setStats({
-            count: documents.length.toLocaleString(),
+            count: totalCount.toLocaleString(),
             accounts: new Set(documents.map(d => d.fields.author_handle?.stringValue)).size.toLocaleString(),
-            rawCount: documents.length
+            rawCount: totalCount
           });
 
           const recent = documents

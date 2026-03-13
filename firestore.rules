@@ -37,5 +37,12 @@ service cloud.firestore {
     match /{document=**} {
       allow read, write: if false;
     }
+
+    // Stats collection: Publicly readable, restricted updates
+    match /stats/{docId} {
+      allow read: if true;
+      allow write: if docId == "global" && 
+        request.resource.data.total_slops is int;
+    }
   }
 }

@@ -234,7 +234,9 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
           action: "showResult",
           data: { 
             ...result.data, 
-            feedback_message: isThread ? `Thread Analysis: ${result.data.feedback_message || "Analyzed"}` : result.data.feedback_message
+            feedback_message: isThread ? `Thread Analysis: ${result.data.feedback_message || "Analyzed"}` : result.data.feedback_message,
+            upvotes: 0,
+            downvotes: 0
           },
           tweetId: tweetId,
           isAutoScan: isAutoScan
@@ -243,6 +245,34 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
     }
   } catch (error) {
     console.error("ZeroSlop: Fetch error:", error);
+  }
+}
+
+async function updateGlobalStats() {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
+  
+  try {
+    // Attempt to get current stats first
+    const getResponse = await fetch(url);
+    let totalCount = 0;
+    
+    if (getResponse.ok) {
+      const doc = await getResponse.json();
+      totalCount = parseInt(doc.fields.total_slops?.integerValue || 0);
+    }
+
+    const fields = {
+      total_slops: { integerValue: totalCount + 1 },
+      last_updated: { timestampValue: new Date().toISOString() }
+    };
+
+    await fetch(url + "?updateMask.fieldPaths=total_slops&updateMask.fieldPaths=last_updated", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields })
+    });
+  } catch (e) {
+    console.error("ZeroSlop: Error updating global stats", e);
   }
 }
 
@@ -260,10 +290,11 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     fields.ai_score = { doubleValue: parseFloat(percentage) };
     if (percentage > 15) {
       incrementSlopsCaught();
+      updateGlobalStats(); // Update the global counter
     }
   } else if (isManual) {
-    // If manual report with no score yet, still count it as a "catch"
     incrementSlopsCaught();
+    updateGlobalStats(); // Update the global counter
   }
 
   if (isManual) fields.manual_report = { booleanValue: true };
@@ -279,7 +310,7 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
   });
 
   try {
-    const response = await fetch(url + maskParams, {
+    await fetch(url + maskParams, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields })
@@ -292,7 +323,6 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
 async function voteSlopTweet(tweetId, voteType) {
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
   
-  // First get the current document to increment the vote
   try {
     const getResponse = await fetch(url);
     if (!getResponse.ok) return;
