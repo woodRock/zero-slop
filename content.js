@@ -287,7 +287,7 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
   // Handle Auto-Hide
   chrome.storage.local.get(['autoHide', 'hideThreshold'], (result) => {
     const autoHide = result.autoHide || false;
-    const hideThreshold = result.hideThreshold || 85;
+    const hideThreshold = result.hideThreshold !== undefined ? result.hideThreshold : 85;
     
     if (autoHide && percentage >= hideThreshold) {
       const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;

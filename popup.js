@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (result.autoHide) {
       autoHideToggle.checked = true;
     }
-    if (result.hideThreshold) {
+    if (result.hideThreshold !== undefined) {
       thresholdSlider.value = result.hideThreshold;
       thresholdVal.textContent = result.hideThreshold;
     }
