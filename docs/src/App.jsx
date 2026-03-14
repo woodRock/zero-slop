@@ -36,17 +36,20 @@ function App() {
           setAllDocs(documents);
           
           let totalCount = documents.length;
+          let totalAccounts = new Set(documents.map(d => d.fields.author_handle?.stringValue)).size;
+
           if (statsResponse.ok) {
             const statsData = await statsResponse.json();
-            // Use the actual field from the global doc
             const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || 0);
-            // Use whichever is higher to prevent "dropping" the count while testing
+            const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || 0);
+            
             totalCount = Math.max(remoteTotal, totalCount);
+            totalAccounts = Math.max(remoteAccounts, totalAccounts);
           }
 
           setStats({
             count: totalCount.toLocaleString(),
-            accounts: new Set(documents.map(d => d.fields.author_handle?.stringValue)).size.toLocaleString(),
+            accounts: totalAccounts.toLocaleString(),
             rawCount: totalCount
           });
 

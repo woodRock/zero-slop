@@ -247,30 +247,39 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
     console.error("ZeroSlop: Fetch error:", error);
   }
 }
-async function updateGlobalStats() {
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}&updateMask.fieldPaths=total_slops&updateMask.fieldPaths=last_updated`;
+async function updateGlobalStats(fieldName = 'total_slops') {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}&updateMask.fieldPaths=${fieldName}&updateMask.fieldPaths=last_updated`;
 
   try {
     const getResponse = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`);
-    let totalCount = 0;
+    let currentCount = 0;
+    let existingFields = {};
 
     if (getResponse.ok) {
       const doc = await getResponse.json();
-      totalCount = parseInt(doc.fields.total_slops?.integerValue || 0);
+      existingFields = doc.fields || {};
+      currentCount = parseInt(existingFields[fieldName]?.integerValue || 0);
     }
 
     const fields = {
-      total_slops: { integerValue: totalCount + 1 },
+      ...existingFields,
+      [fieldName]: { integerValue: currentCount + 1 },
+      last_updated: { timestampValue: new Date().toISOString() }
+    };
+
+    // Only PATCH the fields we want to update
+    const patchFields = {
+      [fieldName]: { integerValue: currentCount + 1 },
       last_updated: { timestampValue: new Date().toISOString() }
     };
 
     await fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields })
+      body: JSON.stringify({ fields: patchFields })
     });
   } catch (e) {
-    console.error("ZeroSlop: Error updating global stats", e);
+    console.error(`ZeroSlop: Error updating global stats for ${fieldName}`, e);
   }
 }
 
@@ -284,22 +293,53 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     last_updated: { timestampValue: new Date().toISOString() }
   };
 
+  const isSlop = (percentage > 15 || isManual);
+
   if (percentage > 0) {
     fields.ai_score = { doubleValue: parseFloat(percentage) };
     if (percentage > 15) {
       incrementSlopsCaught();
-      updateGlobalStats(); // Update the global counter
+      updateGlobalStats('total_slops');
     }
   } else if (isManual) {
     incrementSlopsCaught();
-    updateGlobalStats(); // Update the global counter
+    updateGlobalStats('total_slops');
   }
 
   if (isManual) fields.manual_report = { booleanValue: true };
+  
   if (author) {
     if (author.name) fields.author_name = { stringValue: author.name };
     if (author.handle) fields.author_handle = { stringValue: author.handle };
     if (author.pfp) fields.author_pfp = { stringValue: author.pfp };
+
+    // Track unique accounts if it's slop
+    if (author.handle && isSlop) {
+      const accountId = author.handle.replace('@', '').toLowerCase();
+      const accountUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+      
+      try {
+        const accCheck = await fetch(accountUrl);
+        if (!accCheck.ok) {
+          // New slop factory detected!
+          await fetch(accountUrl, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fields: {
+                handle: { stringValue: author.handle },
+                name: { stringValue: author.name || "" },
+                pfp: { stringValue: author.pfp || "" },
+                first_detected: { timestampValue: new Date().toISOString() }
+              }
+            })
+          });
+          updateGlobalStats('total_accounts');
+        }
+      } catch (e) {
+        console.error("ZeroSlop: Error tracking account:", e);
+      }
+    }
   }
 
   let maskParams = "";
