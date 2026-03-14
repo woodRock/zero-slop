@@ -33,6 +33,20 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Slop Accounts: Publicly readable registry of AI-slop posting accounts
+    match /slop_accounts/{accountId} {
+      // Allow everyone to read
+      allow read: if true;
+      
+      // Allow creation of new slop accounts
+      allow create, update: if 
+        // 1. Ensure the handle is present and is a string
+        request.resource.data.handle is string;
+        
+      // Prevent deletion
+      allow delete: if false;
+    }
+
     // Default: Deny all other access
     match /{document=**} {
       allow read, write: if false;
@@ -42,7 +56,8 @@ service cloud.firestore {
     match /stats/{docId} {
       allow read: if true;
       allow write: if docId == "global" && 
-        request.resource.data.total_slops is int;
+        (request.resource.data.total_slops is int || 
+         request.resource.data.total_accounts is int);
     }
   }
 }
