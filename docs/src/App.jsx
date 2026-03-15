@@ -41,7 +41,7 @@ function App() {
         }
         
         // 2. Fetch Recent Documents for Wall of Shame & Search (Sorted by update time)
-        const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=100&orderBy=last_updated desc&t=${Date.now()}`;
+        const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000&orderBy=last_updated desc&t=${Date.now()}`;
         const response = await fetch(url);
         
         if (response.ok) {
@@ -129,25 +129,27 @@ function App() {
   // Group by day for trends
   const getTrendsData = () => {
     const days = {};
+    const docCounts = {};
     const today = new Date();
+
+    // Count from allDocs (last 1000)
+    allDocs.forEach(doc => {
+      const dateStr = doc.updateTime.split('T')[0];
+      docCounts[dateStr] = (docCounts[dateStr] || 0) + 1;
+    });
+
     // Show last 10 days to ensure March 13th is visible
     for (let i = 0; i < 10; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() - i);
       const dateStr = date.toISOString().split('T')[0];
-      days[dateStr] = trendStats[dateStr] || 0;
+      // Use the max of our historical trendStats or what we see in the latest 1000 docs
+      days[dateStr] = Math.max(trendStats[dateStr] || 0, docCounts[dateStr] || 0);
     }
-
-    // Fallback/Supplement with data from current 100 docs if trendStats is missing some
-    allDocs.forEach(doc => {
-      const dateStr = doc.updateTime.split('T')[0];
-      if (days[dateStr] !== undefined && !trendStats[dateStr]) {
-        days[dateStr]++;
-      }
-    });
 
     return Object.entries(days).reverse();
   };
+
 
   const trends = getTrendsData();
   const maxTrend = Math.max(...trends.map(t => t[1]), 1);
