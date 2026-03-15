@@ -1,5 +1,11 @@
 # ZeroSlop: The Community-Powered AI Detection Shield 🛡️✨
 
+[![Chrome Web Store Version](https://img.shields.io/chrome-web-store/v/enlimjkhkfbhcoebopkklafhakhehiab?style=for-the-badge&logo=google-chrome&logoColor=white)](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab)
+[![Chrome Web Store Users](https://img.shields.io/chrome-web-store/users/enlimjkhkfbhcoebopkklafhakhehiab?style=for-the-badge&color=green)](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab)
+<a href="https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab">
+  <img src="https://developer.chrome.com/docs/webstore/images/ChromeWebStore_Badge_v2_206x58.png" alt="Available in the Chrome Web Store" height="58">
+</a>
+
 ![ZeroSlop Hero](docs/public/banner.jpg)
 
 **ZeroSlop** is an open-source Chrome extension designed to identify and expose AI-generated "slop" on Twitter (X). Built with a community-first ethos, it turns detection into a collective effort to keep the timeline human.
