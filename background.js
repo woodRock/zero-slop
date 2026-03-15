@@ -247,7 +247,38 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
     console.error("ZeroSlop: Fetch error:", error);
   }
 }
+async function updateDailyTrend() {
+  const dateStr = new Date().toISOString().split('T')[0];
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends/${dateStr}?key=${FIREBASE_CONFIG.apiKey}&updateMask.fieldPaths=count&updateMask.fieldPaths=last_updated`;
+
+  try {
+    const getResponse = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends/${dateStr}?key=${FIREBASE_CONFIG.apiKey}`);
+    let currentCount = 0;
+
+    if (getResponse.ok) {
+      const doc = await getResponse.json();
+      currentCount = parseInt(doc.fields.count?.integerValue || 0);
+    }
+
+    const fields = {
+      count: { integerValue: currentCount + 1 },
+      last_updated: { timestampValue: new Date().toISOString() }
+    };
+
+    await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields })
+    });
+  } catch (e) {
+    console.error("ZeroSlop: Error updating daily trend", e);
+  }
+}
+
 async function updateGlobalStats(fieldName = 'total_slops') {
+  if (fieldName === 'total_slops') {
+    updateDailyTrend();
+  }
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}&updateMask.fieldPaths=${fieldName}&updateMask.fieldPaths=last_updated`;
 
   try {

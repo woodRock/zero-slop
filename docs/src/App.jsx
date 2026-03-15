@@ -16,6 +16,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [allDocs, setAllDocs] = useState([]);
+  const [trendStats, setTrendStats] = useState({});
   
   const GOAL = 5000; // Community goal
 
@@ -25,6 +26,19 @@ function App() {
         // 1. Fetch Global Stats
         const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
         const statsResponse = await fetch(statsUrl);
+
+        // 1.5 Fetch Trends Collection
+        const trendsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends?key=${FIREBASE_CONFIG.apiKey}&pageSize=100`;
+        const trendsResponse = await fetch(trendsUrl);
+        if (trendsResponse.ok) {
+          const trendsData = await trendsResponse.json();
+          const trendMap = {};
+          (trendsData.documents || []).forEach(doc => {
+            const dateStr = doc.name.split('/').pop();
+            trendMap[dateStr] = parseInt(doc.fields.count?.integerValue || 0);
+          });
+          setTrendStats(trendMap);
+        }
         
         // 2. Fetch Recent Documents for Wall of Shame & Search (Sorted by update time)
         const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=100&orderBy=last_updated desc&t=${Date.now()}`;
@@ -116,16 +130,18 @@ function App() {
   const getTrendsData = () => {
     const days = {};
     const today = new Date();
-    for (let i = 0; i < 7; i++) {
+    // Show last 10 days to ensure March 13th is visible
+    for (let i = 0; i < 10; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() - i);
       const dateStr = date.toISOString().split('T')[0];
-      days[dateStr] = 0;
+      days[dateStr] = trendStats[dateStr] || 0;
     }
 
+    // Fallback/Supplement with data from current 100 docs if trendStats is missing some
     allDocs.forEach(doc => {
       const dateStr = doc.updateTime.split('T')[0];
-      if (days[dateStr] !== undefined) {
+      if (days[dateStr] !== undefined && !trendStats[dateStr]) {
         days[dateStr]++;
       }
     });
