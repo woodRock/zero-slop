@@ -3,7 +3,7 @@
 [![Chrome Web Store Version](https://img.shields.io/chrome-web-store/v/enlimjkhkfbhcoebopkklafhakhehiab?style=for-the-badge&logo=google-chrome&logoColor=white)](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab)
 [![Chrome Web Store Users](https://img.shields.io/chrome-web-store/users/enlimjkhkfbhcoebopkklafhakhehiab?style=for-the-badge&color=green)](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab)
 <a href="https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab">
-  <img src="https://developer.chrome.com/static/docs/extensions/mv3/branding/images/ChromeWebStore_Badge_v2_206x58.png" alt="Available in the Chrome Web Store" height="58">
+  <img src="https://raw.githubusercontent.com/GoogleChrome/webstore-docs/master/images/ChromeWebStore_Badge_v2_206x58.png" alt="Available in the Chrome Web Store" height="58">
 </a>
 
 ![ZeroSlop Hero](docs/public/banner.jpg)
