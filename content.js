@@ -147,11 +147,18 @@ function injectProfileBanner(handle, highSlopCount, avgScore) {
   `;
   banner.innerHTML = `
     <span>⚠️ SLOP WARNING: ${handle} has ${highSlopCount} high-slop detections (Avg: ${avgScore}% AI)</span>
-    <button id="close-slop-banner" style="background: rgba(255,255,255,0.2); border: none; color: white; border-radius: 4px; padding: 2px 8px; cursor: pointer;">Dismiss</button>
+    <button id="verify-slop-factory" style="background: white; border: none; color: #f4212e; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Verify as Slop Factory</button>
+    <button id="close-slop-banner" style="background: rgba(255,255,255,0.2); border: none; color: white; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px;">Dismiss</button>
   `;
 
   document.body.prepend(banner);
   banner.querySelector('#close-slop-banner').onclick = () => banner.remove();
+  banner.querySelector('#verify-slop-factory').onclick = () => {
+    const info = extractProfileInfo(null);
+    chrome.runtime.sendMessage({ action: "manualReportAccount", author: info.author });
+    banner.querySelector('#verify-slop-factory').innerText = '✅ Reported';
+    banner.querySelector('#verify-slop-factory').disabled = true;
+  };
 }
 
 function getTweetContainer(element) {

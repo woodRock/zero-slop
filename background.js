@@ -39,11 +39,11 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["all"]
     });
 
-    // Sub-item: Report
+    // Sub-item: Report Account
     chrome.contextMenus.create({
-      id: "reportSlop",
+      id: "reportAccount",
       parentId: "zeroSlopParent",
-      title: "🚩 Report as AI Slop",
+      title: "🚩 Mark as Slop Factory",
       contexts: ["all"]
     });
 
@@ -87,6 +87,17 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         });
       }
     });
+  } else if (info.menuItemId === "reportAccount") {
+    chrome.tabs.sendMessage(tab.id, { action: "getProfileText" }, (response) => {
+      if (response && response.author && response.author.handle) {
+        storeSlopFactoryReport(response.author);
+        chrome.tabs.sendMessage(tab.id, { 
+          action: "showResult", 
+          data: { feedback_message: `Marked ${response.author.handle} as Potential Slop Factory` },
+          isAutoScan: false
+        });
+      }
+    });
   }
 });
 
@@ -121,6 +132,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
   } else if (request.action === "reportSuspicious") {
     storeSuspiciousAccount(request.handle, request.name, request.pfp, request.tweetId);
+  } else if (request.action === "manualReportAccount") {
+    storeSlopFactoryReport(request.author);
   } else if (request.action === "checkSuspicious") {
     checkSuspiciousAccount(request.handle).then(data => {
       if (data) {
@@ -213,8 +226,50 @@ async function checkRegistry(tweetId) {
     }
   } catch (e) {}
   return null;
-}
+  }
 
+  async function storeSlopFactoryReport(author) {
+  const accountId = author.handle.replace('@', '').toLowerCase();
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+
+  try {
+  const getResponse = await fetch(url);
+  let currentReports = 0;
+  let existingFields = {};
+
+  if (getResponse.ok) {
+    const doc = await getResponse.json();
+    existingFields = doc.fields || {};
+    currentReports = parseInt(existingFields.manual_reports?.integerValue || 0);
+  }
+
+  const fields = {
+    ...existingFields,
+    handle: { stringValue: author.handle },
+    name: { stringValue: author.name || "" },
+    pfp: { stringValue: author.pfp || "" },
+    manual_reports: { integerValue: currentReports + 1 },
+    last_reported: { timestampValue: new Date().toISOString() }
+  };
+
+  if (!existingFields.first_detected) {
+    fields.first_detected = { timestampValue: new Date().toISOString() };
+  }
+
+  let maskParams = "";
+  Object.keys(fields).forEach(key => {
+    maskParams += `&updateMask.fieldPaths=${key}`;
+  });
+
+  await fetch(url + maskParams, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fields })
+  });
+  } catch (e) {
+  console.error("ZeroSlop: Error reporting slop factory", e);
+  }
+  }
 async function performDetection(text, tabId, tweetId = null, isAutoScan = false, author = null, isThread = false) {
   const { zerogptApiKey } = await chrome.storage.local.get(['zerogptApiKey']);
   if (!zerogptApiKey) return;
