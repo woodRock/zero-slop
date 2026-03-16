@@ -41,9 +41,9 @@ function App() {
 
     const topFactories = Object.values(handleMap)
       .sort((a, b) => b.count - a.count)
-      .slice(0, 3)
+      .slice(0, 10)
       .map(f => ({
-        name: f.handle,
+        handle: f.handle,
         score: Math.round(f.scores.reduce((a, b) => a + b, 0) / f.scores.length),
         count: f.count
       }));
@@ -55,7 +55,7 @@ function App() {
       const words = text.match(/#[a-z0-9_]+|(?<=^|(?<=[^a-z0-9_]))[a-z0-9_]{5,}(?=[^a-z0-9_]|$)/gi) || [];
       words.forEach(word => {
         const w = word.toLowerCase();
-        if (['https', 'twitter', 'status', 'photo'].includes(w)) return;
+        if (['https', 'twitter', 'status', 'photo', 'thread', 'check', 'repost'].includes(w)) return;
         if (!keywordMap[w]) keywordMap[w] = { name: word, count: 0, scores: [] };
         keywordMap[w].count++;
         keywordMap[w].scores.push(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0);
@@ -64,19 +64,33 @@ function App() {
 
     const topTrends = Object.values(keywordMap)
       .sort((a, b) => b.count - a.count)
-      .slice(0, 5)
+      .slice(0, 10)
       .map(t => ({
         name: t.name.startsWith('#') ? t.name : `#${t.name}`,
         score: Math.round(t.scores.reduce((a, b) => a + b, 0) / t.scores.length),
         count: t.count
       }));
 
+    // 3. Daily Slop Volume
+    const dailyVolume = {};
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      dailyVolume[d.toISOString().split('T')[0]] = 0;
+    }
+    slopDocs.forEach(doc => {
+      const date = doc.updateTime.split('T')[0];
+      if (dailyVolume[date] !== undefined) dailyVolume[date]++;
+    });
+
     return {
       title: "Global State of the Feed",
       date: `Week of ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`,
       summary: `Our global registry analysis for the past 7 days shows ${slopDocs.length} confirmed AI-generated tweets. The timeline is currently ${Math.round((slopDocs.length / Math.max(recentDocs.length, 1)) * 100)}% sloppy.`,
       totalSlops: slopDocs.length,
-      topTrends: topTrends.length > 0 ? topTrends : topFactories
+      topTrends: topTrends,
+      topFactories: topFactories,
+      dailyVolume: Object.entries(dailyVolume).reverse()
     };
   };
 
@@ -315,33 +329,56 @@ function App() {
                 <p style={{ fontSize: '0.9rem', color: '#71767b', marginBottom: '15px' }}>{weeklyAudit.date} · Data-driven slop analysis</p>
                 
                 <p style={{ marginBottom: '15px', fontWeight: 'bold' }}>{weeklyAudit.summary}</p>
-                
-                <div style={{ background: '#16181c', borderRadius: '12px', overflow: 'hidden', border: '1px solid #2f3336' }}>
-                  <div style={{ padding: '12px', borderBottom: '1px solid #2f3336', background: '#1d9bf01a', fontWeight: 'bold' }}>
-                    🚩 Bot-Driven Trend Leaderboard
-                  </div>
-                  {weeklyAudit.topTrends.map((trend, i) => (
-                    <div key={i} style={{ padding: '12px', borderBottom: i === weeklyAudit.topTrends.length - 1 ? 'none' : '1px solid #2f3336', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>{i + 1}. {trend.name}</div>
-                        <div style={{ fontSize: '0.8rem', color: '#71767b' }}>{trend.count} reports analyzed</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
+
+                {/* Daily Volume Chart */}
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px', color: '#1d9bf0' }}>📈 Daily Slop Volume (7D)</div>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '80px', background: '#16181c', padding: '15px', borderRadius: '12px', border: '1px solid #2f3336' }}>
+                    {weeklyAudit.dailyVolume.map(([date, count], i) => (
+                      <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
                         <div style={{ 
-                          color: trend.score > 80 ? '#f4212e' : trend.score > 50 ? '#ffd700' : '#00ba7c', 
-                          fontWeight: 'bold',
-                          fontSize: '1.1rem'
-                        }}>
-                          {trend.score}% Sloppy
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: '#71767b' }}>AI-Generated Confidence</div>
+                          width: '12px', 
+                          height: `${(count / Math.max(...weeklyAudit.dailyVolume.map(v => v[1]), 1)) * 50}px`, 
+                          background: '#f4212e', 
+                          borderRadius: '2px 2px 0 0',
+                          minHeight: count > 0 ? '4px' : '0'
+                        }}></div>
+                        <div style={{ fontSize: '0.6rem', color: '#71767b', marginTop: '4px' }}>{date.split('-')[2]}</div>
                       </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="audit-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                  {/* Top Trends */}
+                  <div style={{ background: '#16181c', borderRadius: '12px', overflow: 'hidden', border: '1px solid #2f3336' }}>
+                    <div style={{ padding: '10px', borderBottom: '1px solid #2f3336', background: '#1d9bf01a', fontWeight: 'bold', fontSize: '0.85rem' }}>
+                      🚩 Trending Slop
                     </div>
-                  ))}
+                    {weeklyAudit.topTrends.slice(0, 5).map((trend, i) => (
+                      <div key={i} style={{ padding: '8px 10px', borderBottom: i === 4 ? 'none' : '1px solid #2f3336', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>{trend.name}</span>
+                        <span style={{ fontSize: '0.75rem', color: '#f4212e' }}>{trend.score}%</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Slop Factories */}
+                  <div style={{ background: '#16181c', borderRadius: '12px', overflow: 'hidden', border: '1px solid #2f3336' }}>
+                    <div style={{ padding: '10px', borderBottom: '1px solid #2f3336', background: '#f4212e1a', fontWeight: 'bold', fontSize: '0.85rem' }}>
+                      🏭 Slop Factories
+                    </div>
+                    {weeklyAudit.topFactories.slice(0, 5).map((f, i) => (
+                      <div key={i} style={{ padding: '8px 10px', borderBottom: i === 4 ? 'none' : '1px solid #2f3336', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80px' }}>{f.handle}</span>
+                        <span style={{ fontSize: '0.75rem', color: '#71767b' }}>{f.count} slops</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 
                 <div style={{ marginTop: '15px', fontSize: '0.85rem', color: '#71767b', fontStyle: 'italic' }}>
-                  * This week, {weeklyAudit.totalSlops} new slop detections were added to the registry. Keep hunting!
+                  * This analysis is generated live from the ZeroSlop Community Registry. Keep hunting!
                 </div>
               </div>
             </Tweet>
