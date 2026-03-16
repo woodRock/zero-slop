@@ -67,5 +67,13 @@ service cloud.firestore {
         request.resource.data.total_slops is int &&
         request.resource.data.top_trends is list;
     }
+
+    // Suspicious Accounts: Track retweeters of slop
+    match /suspicious_accounts/{accountId} {
+      allow read: if true;
+      allow create, update: if 
+        request.resource.data.handle is string &&
+        request.resource.data.reason_tweet_id is string;
+    }
   }
 }

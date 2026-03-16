@@ -119,6 +119,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
       }
     });
+  } else if (request.action === "reportSuspicious") {
+    storeSuspiciousAccount(request.handle, request.name, request.pfp, request.tweetId);
+  } else if (request.action === "checkSuspicious") {
+    checkSuspiciousAccount(request.handle).then(data => {
+      if (data) {
+        chrome.tabs.sendMessage(sender.tab.id, {
+          action: "showSuspiciousWarning",
+          handle: request.handle,
+          reasonTweetId: data.reason_tweet_id
+        });
+      }
+    });
   } else if (request.action === "checkProfileSlop") {
     checkProfileSlop(request.handle).then(data => {
       if (data && data.highSlopCount > 0) {
@@ -429,5 +441,44 @@ function saveToHistory(text, percentage, words) {
     });
     if (history.length > 50) history = history.slice(-50);
     chrome.storage.local.set({ scanHistory: history });
-  });
-}
+    });
+    }
+
+    async function storeSuspiciousAccount(handle, name, pfp, tweetId) {
+    const accountId = handle.replace('@', '').toLowerCase();
+    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+
+    const fields = {
+    handle: { stringValue: handle },
+    name: { stringValue: name || "" },
+    pfp: { stringValue: pfp || "" },
+    reason_tweet_id: { stringValue: tweetId },
+    detected_at: { timestampValue: new Date().toISOString() }
+    };
+
+    try {
+    await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields })
+    });
+    } catch (e) {
+    console.error("ZeroSlop: Error storing suspicious account", e);
+    }
+    }
+
+    async function checkSuspiciousAccount(handle) {
+    const accountId = handle.replace('@', '').toLowerCase();
+    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+
+    try {
+    const response = await fetch(url);
+    if (response.ok) {
+      const doc = await response.json();
+      return {
+        reason_tweet_id: doc.fields.reason_tweet_id?.stringValue
+      };
+    }
+    } catch (e) {}
+    return null;
+    }

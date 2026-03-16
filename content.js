@@ -47,9 +47,81 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     showOverlay(request.message, "error");
   } else if (request.action === "showProfileWarning") {
     injectProfileBanner(request.handle, request.highSlopCount, request.avgScore);
+  } else if (request.action === "showSuspiciousWarning") {
+    injectSuspiciousBanner(request.handle, request.reasonTweetId);
+    // Also find all visible tweets by this handle and add badge
+    const articles = document.querySelectorAll('article');
+    articles.forEach(article => {
+      const info = extractTweetInfo(article);
+      if (info.author?.handle === request.handle) {
+        injectSuspiciousBadge(article, request.handle);
+      }
+    });
   }
   return true; 
 });
+
+function injectSuspiciousBanner(handle, reasonTweetId) {
+  const existing = document.getElementById('zerogpt-suspicious-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'zerogpt-suspicious-banner';
+  banner.style.cssText = `
+    background: #ffd700;
+    color: #000;
+    padding: 12px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 9999;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border-bottom: 2px solid rgba(0,0,0,0.1);
+  `;
+  banner.innerHTML = `
+    <span>🕵️ POTENTIAL BOT: ${handle} recently retweeted a confirmed AI-slop tweet.</span>
+    <a href="https://x.com/i/status/${reasonTweetId}" target="_blank" style="color: #000; text-decoration: underline; font-size: 12px;">View Slop</a>
+    <button id="close-suspicious-banner" style="background: rgba(0,0,0,0.1); border: none; color: #000; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px;">Dismiss</button>
+  `;
+
+  document.body.prepend(banner);
+  banner.querySelector('#close-suspicious-banner').onclick = () => banner.remove();
+}
+
+function injectSuspiciousBadge(container, handle) {
+  if (!container || container.querySelector('.zerogpt-suspicious-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-suspicious-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #000;
+    background-color: #ffd700;
+    vertical-align: middle;
+    line-height: 1;
+    height: 16px;
+    cursor: help;
+  `;
+  badge.innerText = '⚠️ POTENTIAL BOT';
+  badge.title = 'This account has recently interacted with AI-slop factories.';
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
 
 function injectProfileBanner(handle, highSlopCount, avgScore) {
   const existing = document.getElementById('zerogpt-profile-banner');
@@ -320,6 +392,7 @@ function initObservers() {
     if (parts.length === 1 && !['home', 'explore', 'notifications', 'messages', 'search', 'settings'].includes(parts[0])) {
       const handle = '@' + parts[0];
       chrome.runtime.sendMessage({ action: "checkProfileSlop", handle: handle });
+      chrome.runtime.sendMessage({ action: "checkSuspicious", handle: handle });
     }
   };
   
@@ -333,8 +406,10 @@ function initObservers() {
       lastPath = window.location.pathname;
       checkProfileWarning();
       // Remove any existing banners on new page
-      const existing = document.getElementById('zerogpt-profile-banner');
-      if (existing) existing.remove();
+      const profileBanner = document.getElementById('zerogpt-profile-banner');
+      if (profileBanner) profileBanner.remove();
+      const suspiciousBanner = document.getElementById('zerogpt-suspicious-banner');
+      if (suspiciousBanner) suspiciousBanner.remove();
     }
   });
   navObserver.observe(document.head, { childList: true, subtree: true });
@@ -353,11 +428,48 @@ function initObservers() {
                 chrome.runtime.sendMessage({ action: "autoScanTweet", ...info });
               }
             });
+            
+            // Check if author is suspicious
+            if (info.author?.handle) {
+              chrome.runtime.sendMessage({ action: "checkSuspicious", handle: info.author.handle });
+            }
           }
         }
       }
     });
   }, { threshold: 0.1 });
+
+  // Special Observer for Retweets/Quotes Modal
+  const retweetObserver = new MutationObserver((mutations) => {
+    const path = window.location.pathname;
+    if (path.includes('/retweets') || path.includes('/quotes')) {
+      const match = path.match(/\/status\/(\d+)/);
+      if (match) {
+        const tweetId = match[1];
+        // Only scrape if the parent tweet is a confirmed slop tweet
+        chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: tweetId }, (data) => {
+          if (data && data.ai_score > 70) {
+            const userCells = document.querySelectorAll('[data-testid="UserCell"]');
+            userCells.forEach(cell => {
+              const handleEl = cell.querySelector('span:nth-child(2)');
+              if (handleEl && handleEl.innerText.startsWith('@')) {
+                const handle = handleEl.innerText;
+                const nameEl = cell.querySelector('span:nth-child(1)');
+                const pfpEl = cell.querySelector('img');
+                chrome.runtime.sendMessage({
+                  action: "reportSuspicious",
+                  handle: handle,
+                  name: nameEl?.innerText,
+                  pfp: pfpEl?.src,
+                  tweetId: tweetId
+                });
+              }
+            });
+          }
+        });
+      }
+    }
+  });
 
   const articles = document.querySelectorAll('article');
   articles.forEach(el => window.zerogptObserver.observe(el));
@@ -378,6 +490,7 @@ function initObservers() {
   });
 
   mutationObserver.observe(document.body, { childList: true, subtree: true });
+  retweetObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 initObservers();
