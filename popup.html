@@ -40,6 +40,7 @@
   <div class="tabs">
     <div class="tab active" data-target="settings">Settings</div>
     <div class="tab" data-target="history">History</div>
+    <div class="tab" data-target="audit">Audit</div>
     <div class="tab" data-target="stats">Stats</div>
   </div>
 
@@ -98,6 +99,27 @@
     </div>
     <div style="margin-top: 20px; font-size: 0.85rem; color: #555; line-height: 1.4;">
       Keep hunting! Every slop you catch helps clean up the timeline for everyone. 🛡️
+    </div>
+  </div>
+
+  <div id="audit" class="tab-content">
+    <h2>Weekly Audit Scan</h2>
+    <div class="onboarding">
+      Help us generate the weekly <b>State of the Feed</b> report! Click below to scan the top trending topics.
+    </div>
+    <button id="scanTrendsBtn" style="background-color: #f4212e;">🔍 Scan Trending Topics</button>
+    <div id="scanStatus" class="status"></div>
+    <div id="auditProgress" style="display: none;">
+      <div style="width: 100%; background: #eee; height: 10px; border-radius: 5px; margin-bottom: 5px;">
+        <div id="auditProgressBar" style="width: 0%; background: #f4212e; height: 100%; border-radius: 5px; transition: width 0.3s;"></div>
+      </div>
+      <div style="font-size: 0.8rem; color: #666; text-align: right;" id="auditProgressText">0/10 Topics</div>
+    </div>
+    
+    <div id="auditResult" style="display: none; margin-top: 15px; border: 1px solid #eee; padding: 10px; border-radius: 8px;">
+      <h3 style="margin-top: 0;">Scan Results</h3>
+      <div id="auditLeaderboard" style="font-size: 0.85rem; max-height: 150px; overflow-y: auto;"></div>
+      <button id="publishAuditBtn" style="margin-top: 10px; background-color: #28a745;">🚀 Publish Weekly Audit</button>
     </div>
   </div>
 

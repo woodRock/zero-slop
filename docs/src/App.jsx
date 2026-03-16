@@ -17,6 +17,7 @@ function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [allDocs, setAllDocs] = useState([]);
   const [trendStats, setTrendStats] = useState({});
+  const [weeklyAudits, setWeeklyAudits] = useState([]);
   
   const GOAL = 5000; // Community goal
 
@@ -38,6 +39,26 @@ function App() {
             trendMap[dateStr] = parseInt(doc.fields.count?.integerValue || 0);
           });
           setTrendStats(trendMap);
+        }
+
+        // 1.7 Fetch Weekly Audits
+        const auditsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/weekly_audits?key=${FIREBASE_CONFIG.apiKey}&pageSize=10&orderBy=created_at desc`;
+        const auditsResponse = await fetch(auditsUrl);
+        if (auditsResponse.ok) {
+          const auditsData = await auditsResponse.json();
+          const audits = (auditsData.documents || []).map(doc => ({
+            id: doc.name.split('/').pop(),
+            title: doc.fields.title?.stringValue || "Weekly State of the Feed",
+            date: doc.fields.date?.stringValue || "Unknown",
+            totalSlops: parseInt(doc.fields.total_slops?.integerValue || 0),
+            summary: doc.fields.summary?.stringValue || "",
+            topTrends: (doc.fields.top_trends?.arrayValue?.values || []).map(v => ({
+              name: v.mapValue.fields.name?.stringValue || "Unknown",
+              score: parseInt(v.mapValue.fields.score?.integerValue || 0),
+              count: parseInt(v.mapValue.fields.count?.integerValue || 0)
+            }))
+          }));
+          setWeeklyAudits(audits);
         }
         
         // 2. Fetch Recent Documents for Wall of Shame & Search (Sorted by update time)
@@ -244,6 +265,47 @@ function App() {
             </div>
           </div>
         </Tweet>
+
+        {weeklyAudits.length > 0 && (
+          <section id="weekly-audit">
+            <Tweet author="ZeroSlop Intelligence" handle="zeroslop_audit">
+              <div style={{ background: '#1d9bf01a', padding: '15px', borderRadius: '12px', border: '1px solid #1d9bf04d' }}>
+                <h2 style={{ color: '#1d9bf0', marginBottom: '5px' }}>📊 {weeklyAudits[0].title}</h2>
+                <p style={{ fontSize: '0.9rem', color: '#71767b', marginBottom: '15px' }}>{weeklyAudits[0].date} · Data-driven slop analysis</p>
+                
+                <p style={{ marginBottom: '15px', fontWeight: 'bold' }}>{weeklyAudits[0].summary}</p>
+                
+                <div style={{ background: '#16181c', borderRadius: '12px', overflow: 'hidden', border: '1px solid #2f3336' }}>
+                  <div style={{ padding: '12px', borderBottom: '1px solid #2f3336', background: '#1d9bf01a', fontWeight: 'bold' }}>
+                    🚩 Bot-Driven Trend Leaderboard
+                  </div>
+                  {weeklyAudits[0].topTrends.map((trend, i) => (
+                    <div key={i} style={{ padding: '12px', borderBottom: i === weeklyAudits[0].topTrends.length - 1 ? 'none' : '1px solid #2f3336', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>{i + 1}. {trend.name}</div>
+                        <div style={{ fontSize: '0.8rem', color: '#71767b' }}>{trend.count} reports analyzed</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ 
+                          color: trend.score > 80 ? '#f4212e' : trend.score > 50 ? '#ffd700' : '#00ba7c', 
+                          fontWeight: 'bold',
+                          fontSize: '1.1rem'
+                        }}>
+                          {trend.score}% Sloppy
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#71767b' }}>AI-Generated Confidence</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                
+                <div style={{ marginTop: '15px', fontSize: '0.85rem', color: '#71767b', fontStyle: 'italic' }}>
+                  * This week, {weeklyAudits[0].totalSlops} new slop detections were added to the registry. Keep hunting!
+                </div>
+              </div>
+            </Tweet>
+          </section>
+        )}
 
         <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-usage-video.mov` }}>
           <p>Check out ZeroSlop in action! Seamlessly integrated into your X timeline. 👇</p>

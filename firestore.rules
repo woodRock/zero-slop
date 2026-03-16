@@ -59,5 +59,13 @@ service cloud.firestore {
         (request.resource.data.total_slops is int || 
          request.resource.data.total_accounts is int);
     }
+
+    // Weekly Audits: Publicly readable, admin-submitted (or community-submitted for now)
+    match /weekly_audits/{auditId} {
+      allow read: if true;
+      allow create, update: if 
+        request.resource.data.total_slops is int &&
+        request.resource.data.top_trends is list;
+    }
   }
 }
