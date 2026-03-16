@@ -162,7 +162,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   } else if (request.action === "checkProfileSlop") {
     checkProfileSlop(request.handle).then(data => {
-      if (data && data.highSlopCount > 0) {
+      // REQUIREMENT: Must have at least 3 high-slop detections to trigger the public warning banner
+      if (data && data.highSlopCount >= 3) {
         chrome.tabs.sendMessage(sender.tab.id, {
           action: "showProfileWarning",
           handle: request.handle,
@@ -206,7 +207,7 @@ async function checkProfileSlop(handle) {
       
       const highSlopDocs = docs.filter(doc => {
         const score = doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0;
-        return score > 70;
+        return score > 15;
       });
 
       if (highSlopDocs.length > 0) {
