@@ -47,6 +47,14 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["all"]
     });
 
+    // Sub-item: Report Slop
+    chrome.contextMenus.create({
+      id: "reportSlop",
+      parentId: "zeroSlopParent",
+      title: "🚩 Report as AI Slop",
+      contexts: ["all"]
+    });
+
     console.log("ZeroSlop: Context menus initialized.");
   });
 });
@@ -128,8 +136,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           tweetId: request.tweetId,
           isAutoScan: true
         });
+        sendResponse(data);
+      } else {
+        sendResponse(null);
       }
     });
+    return true;
   } else if (request.action === "reportSuspicious") {
     storeSuspiciousAccount(request.handle, request.name, request.pfp, request.tweetId);
   } else if (request.action === "manualReportAccount") {
@@ -142,8 +154,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           handle: request.handle,
           reasonTweetId: data.reason_tweet_id
         });
+        sendResponse(data);
+      } else {
+        sendResponse(null);
       }
     });
+    return true;
   } else if (request.action === "checkProfileSlop") {
     checkProfileSlop(request.handle).then(data => {
       if (data && data.highSlopCount > 0) {
@@ -153,8 +169,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           highSlopCount: data.highSlopCount,
           avgScore: data.avgScore
         });
+        sendResponse(data);
+      } else {
+        sendResponse(null);
       }
     });
+    return true;
   }
 });
 
@@ -226,53 +246,62 @@ async function checkRegistry(tweetId) {
     }
   } catch (e) {}
   return null;
-  }
+}
 
-  async function storeSlopFactoryReport(author) {
+async function storeSlopFactoryReport(author) {
   const accountId = author.handle.replace('@', '').toLowerCase();
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
 
   try {
-  const getResponse = await fetch(url);
-  let currentReports = 0;
-  let existingFields = {};
+    const getResponse = await fetch(url);
+    let currentReports = 0;
+    let existingFields = {};
 
-  if (getResponse.ok) {
-    const doc = await getResponse.json();
-    existingFields = doc.fields || {};
-    currentReports = parseInt(existingFields.manual_reports?.integerValue || 0);
-  }
+    if (getResponse.ok) {
+      const doc = await getResponse.json();
+      existingFields = doc.fields || {};
+      currentReports = parseInt(existingFields.manual_reports?.integerValue || 0);
+    }
 
-  const fields = {
-    ...existingFields,
-    handle: { stringValue: author.handle },
-    name: { stringValue: author.name || "" },
-    pfp: { stringValue: author.pfp || "" },
-    manual_reports: { integerValue: currentReports + 1 },
-    last_reported: { timestampValue: new Date().toISOString() }
-  };
+    const fields = {
+      ...existingFields,
+      handle: { stringValue: author.handle },
+      name: { stringValue: author.name || "" },
+      pfp: { stringValue: author.pfp || "" },
+      manual_reports: { integerValue: currentReports + 1 },
+      last_reported: { timestampValue: new Date().toISOString() }
+    };
 
-  if (!existingFields.first_detected) {
-    fields.first_detected = { timestampValue: new Date().toISOString() };
-  }
+    if (!existingFields.first_detected) {
+      fields.first_detected = { timestampValue: new Date().toISOString() };
+    }
 
-  let maskParams = "";
-  Object.keys(fields).forEach(key => {
-    maskParams += `&updateMask.fieldPaths=${key}`;
-  });
+    let maskParams = "";
+    Object.keys(fields).forEach(key => {
+      maskParams += `&updateMask.fieldPaths=${key}`;
+    });
 
-  await fetch(url + maskParams, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fields })
-  });
+    await fetch(url + maskParams, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields })
+    });
   } catch (e) {
-  console.error("ZeroSlop: Error reporting slop factory", e);
+    console.error("ZeroSlop: Error reporting slop factory", e);
   }
-  }
+}
+
 async function performDetection(text, tabId, tweetId = null, isAutoScan = false, author = null, isThread = false) {
   const { zerogptApiKey } = await chrome.storage.local.get(['zerogptApiKey']);
-  if (!zerogptApiKey) return;
+  if (!zerogptApiKey) {
+    if (!isAutoScan) {
+      chrome.tabs.sendMessage(tabId, { 
+        action: "showError", 
+        message: "API Key is missing! Please set it in the extension popup." 
+      });
+    }
+    return;
+  }
 
   if (!isAutoScan) chrome.tabs.sendMessage(tabId, { action: "showLoader" });
 
@@ -314,6 +343,7 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
     console.error("ZeroSlop: Fetch error:", error);
   }
 }
+
 async function updateDailyTrend() {
   const dateStr = new Date().toISOString().split('T')[0];
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends/${dateStr}?key=${FIREBASE_CONFIG.apiKey}&updateMask.fieldPaths=count&updateMask.fieldPaths=last_updated`;
@@ -496,37 +526,37 @@ function saveToHistory(text, percentage, words) {
     });
     if (history.length > 50) history = history.slice(-50);
     chrome.storage.local.set({ scanHistory: history });
-    });
-    }
+  });
+}
 
-    async function storeSuspiciousAccount(handle, name, pfp, tweetId) {
-    const accountId = handle.replace('@', '').toLowerCase();
-    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+async function storeSuspiciousAccount(handle, name, pfp, tweetId) {
+  const accountId = handle.replace('@', '').toLowerCase();
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
 
-    const fields = {
+  const fields = {
     handle: { stringValue: handle },
     name: { stringValue: name || "" },
     pfp: { stringValue: pfp || "" },
     reason_tweet_id: { stringValue: tweetId },
     detected_at: { timestampValue: new Date().toISOString() }
-    };
+  };
 
-    try {
+  try {
     await fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields })
     });
-    } catch (e) {
+  } catch (e) {
     console.error("ZeroSlop: Error storing suspicious account", e);
-    }
-    }
+  }
+}
 
-    async function checkSuspiciousAccount(handle) {
-    const accountId = handle.replace('@', '').toLowerCase();
-    const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+async function checkSuspiciousAccount(handle) {
+  const accountId = handle.replace('@', '').toLowerCase();
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
 
-    try {
+  try {
     const response = await fetch(url);
     if (response.ok) {
       const doc = await response.json();
@@ -534,6 +564,6 @@ function saveToHistory(text, percentage, words) {
         reason_tweet_id: doc.fields.reason_tweet_id?.stringValue
       };
     }
-    } catch (e) {}
-    return null;
-    }
+  } catch (e) {}
+  return null;
+}

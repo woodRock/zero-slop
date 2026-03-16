@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ZeroSlop: ZeroGPT Tweet Checker",
-  "version": "1.1.2",
+  "version": "1.1.5",
   "description": "Instantly detect AI-generated tweets on Twitter (X) using the ZeroGPT Business API.",
   "permissions": [
     "storage",
@@ -10,7 +10,9 @@
   "host_permissions": [
     "https://api.zerogpt.com/*",
     "https://twitter.com/*",
-    "https://x.com/*"
+    "https://x.com/*",
+    "https://firestore.googleapis.com/*",
+    "https://raw.githubusercontent.com/*"
   ],
   "icons": {
     "16": "icons/icon16.png",

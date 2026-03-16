@@ -42,7 +42,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       showOverlay(message, "success", data.fakePercentage);
     }
     
-    injectBadge(request.tweetId || getTweetContainer(lastRightClickedElement), data.fakePercentage || 0, data.upvotes || 0, data.downvotes || 0);
+    const container = request.tweetId ? null : getTweetContainer(lastRightClickedElement);
+    injectBadge(request.tweetId || container, data.fakePercentage || 0, data.upvotes || 0, data.downvotes || 0);
   } else if (request.action === "showError") {
     showOverlay(request.message, "error");
   } else if (request.action === "showProfileWarning") {
@@ -155,9 +156,11 @@ function injectProfileBanner(handle, highSlopCount, avgScore) {
   banner.querySelector('#close-slop-banner').onclick = () => banner.remove();
   banner.querySelector('#verify-slop-factory').onclick = () => {
     const info = extractProfileInfo(null);
-    chrome.runtime.sendMessage({ action: "manualReportAccount", author: info.author });
-    banner.querySelector('#verify-slop-factory').innerText = '✅ Reported';
-    banner.querySelector('#verify-slop-factory').disabled = true;
+    if (info && info.author && info.author.handle) {
+      chrome.runtime.sendMessage({ action: "manualReportAccount", author: info.author });
+      banner.querySelector('#verify-slop-factory').innerText = '✅ Reported';
+      banner.querySelector('#verify-slop-factory').disabled = true;
+    }
   };
 }
 
@@ -266,7 +269,7 @@ function extractProfileInfo(element) {
   // If we are on a profile page but didn't click a tweet, try to get handle from URL
   if (!targetHandle) {
     const pathParts = window.location.pathname.split('/');
-    if (pathParts.length >= 2 && !['home', 'explore', 'notifications', 'messages'].includes(pathParts[1])) {
+    if (pathParts.length >= 2 && !['home', 'explore', 'notifications', 'messages', 'search', 'settings'].includes(pathParts[1])) {
       targetHandle = '@' + pathParts[1];
     }
   }
@@ -296,17 +299,22 @@ function extractProfileInfo(element) {
     text: combinedText.trim(),
     isThread: true,
     tweetCount: count,
-    author: { ...currentTweetInfo.author, handle: targetHandle }
+    author: { ... (currentTweetInfo.author || {}), handle: targetHandle }
   };
 }
 
 function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0) {
   let container;
+  let tweetIdString = "";
+
   if (typeof tweetIdOrContainer === 'string') {
+    tweetIdString = tweetIdOrContainer;
     container = document.querySelector(`article a[href*="/status/${tweetIdOrContainer}"]`)?.closest('article') ||
                 document.querySelector(`[data-zerogpt-id="${tweetIdOrContainer}"]`);
   } else {
     container = tweetIdOrContainer;
+    const info = extractTweetInfo(container);
+    tweetIdString = info.tweetId;
   }
 
   if (!container || container.querySelector('.zerogpt-badge')) return;
@@ -347,15 +355,19 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
   badge.querySelector('.vote-up').addEventListener('click', (e) => {
     e.stopPropagation();
     e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteSlop", voteType: "up", tweetId: tweetIdOrContainer });
-    badge.querySelector('.vote-up').innerText = '✅';
+    if (tweetIdString) {
+      chrome.runtime.sendMessage({ action: "voteSlop", voteType: "up", tweetId: tweetIdString });
+      badge.querySelector('.vote-up').innerText = '✅';
+    }
   });
 
   badge.querySelector('.vote-down').addEventListener('click', (e) => {
     e.stopPropagation();
     e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteSlop", voteType: "down", tweetId: tweetIdOrContainer });
-    badge.querySelector('.vote-down').innerText = '❌';
+    if (tweetIdString) {
+      chrome.runtime.sendMessage({ action: "voteSlop", voteType: "down", tweetId: tweetIdString });
+      badge.querySelector('.vote-down').innerText = '❌';
+    }
   });
 
   const timeElement = container.querySelector('time');
@@ -503,6 +515,7 @@ function initObservers() {
 initObservers();
 
 async function generateWantedPoster(author, percentage) {
+  if (!author) return;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   canvas.width = 600;
@@ -639,14 +652,16 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
         font-size: 0.9rem;
       `;
       reportBtn.onclick = () => {
-        chrome.runtime.sendMessage({
-          action: "manualReport",
-          aiScore: currentAiScore,
-          ...info
-        });
-        reportBtn.innerText = '✅ Reported to Registry';
-        reportBtn.style.background = '#00ba7c';
-        reportBtn.disabled = true;
+        if (info) {
+          chrome.runtime.sendMessage({
+            action: "manualReport",
+            aiScore: currentAiScore,
+            ...info
+          });
+          reportBtn.innerText = '✅ Reported to Registry';
+          reportBtn.style.background = '#00ba7c';
+          reportBtn.disabled = true;
+        }
       };
       btnContainer.appendChild(reportBtn);
     }
@@ -665,11 +680,13 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
       font-size: 0.9rem;
     `;
     posterBtn.onclick = () => {
-      posterBtn.innerText = '⌛ Generating...';
-      generateWantedPoster(info.author, currentAiScore).then(() => {
-        posterBtn.innerText = '📋 Copied to Clipboard!';
-        setTimeout(() => posterBtn.innerText = '🖼️ Generate Wanted Poster', 3000);
-      });
+      if (info && info.author) {
+        posterBtn.innerText = '⌛ Generating...';
+        generateWantedPoster(info.author, currentAiScore).then(() => {
+          posterBtn.innerText = '📋 Copied to Clipboard!';
+          setTimeout(() => posterBtn.innerText = '🖼️ Generate Wanted Poster', 3000);
+        });
+      }
     };    btnContainer.appendChild(posterBtn);
     overlay.appendChild(btnContainer);
   }
