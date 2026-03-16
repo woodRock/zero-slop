@@ -19,16 +19,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "getProfileText") {
     const info = extractProfileInfo(lastRightClickedElement);
     sendResponse(info);
-  } else if (request.action === "getTrends") {
-    const trends = [];
-    const trendElements = document.querySelectorAll('[data-testid="trend"]');
-    trendElements.forEach(el => {
-      const nameEl = el.querySelector('div > div:nth-child(2) > span');
-      if (nameEl) {
-        trends.push(nameEl.innerText);
-      }
-    });
-    sendResponse({ trends: trends.slice(0, 10) });
   } else if (request.action === "showLoader") {
     showOverlay("Analyzing text with ZeroGPT...");
   } else if (request.action === "showResult") {

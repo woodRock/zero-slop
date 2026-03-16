@@ -17,9 +17,70 @@ function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [allDocs, setAllDocs] = useState([]);
   const [trendStats, setTrendStats] = useState({});
-  const [weeklyAudits, setWeeklyAudits] = useState([]);
   
   const GOAL = 5000; // Community goal
+
+  const getGlobalAudit = () => {
+    if (allDocs.length === 0) return null;
+
+    // Filter for last 7 days
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const recentDocs = allDocs.filter(doc => new Date(doc.updateTime) > sevenDaysAgo);
+    const slopDocs = recentDocs.filter(doc => (doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0) > 15);
+
+    // 1. Top Slop Factories (Accounts)
+    const handleMap = {};
+    slopDocs.forEach(doc => {
+      const handle = doc.fields.author_handle?.stringValue || "@anonymous";
+      if (!handleMap[handle]) handleMap[handle] = { handle, count: 0, scores: [] };
+      handleMap[handle].count++;
+      handleMap[handle].scores.push(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0);
+    });
+
+    const topFactories = Object.values(handleMap)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3)
+      .map(f => ({
+        name: f.handle,
+        score: Math.round(f.scores.reduce((a, b) => a + b, 0) / f.scores.length),
+        count: f.count
+      }));
+
+    // 2. Sloppy Trends (Keywords/Hashtags)
+    const keywordMap = {};
+    slopDocs.forEach(doc => {
+      const text = doc.fields.text?.stringValue || "";
+      const words = text.match(/#[a-z0-9_]+|(?<=^|(?<=[^a-z0-9_]))[a-z0-9_]{5,}(?=[^a-z0-9_]|$)/gi) || [];
+      words.forEach(word => {
+        const w = word.toLowerCase();
+        if (['https', 'twitter', 'status', 'photo'].includes(w)) return;
+        if (!keywordMap[w]) keywordMap[w] = { name: word, count: 0, scores: [] };
+        keywordMap[w].count++;
+        keywordMap[w].scores.push(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0);
+      });
+    });
+
+    const topTrends = Object.values(keywordMap)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5)
+      .map(t => ({
+        name: t.name.startsWith('#') ? t.name : `#${t.name}`,
+        score: Math.round(t.scores.reduce((a, b) => a + b, 0) / t.scores.length),
+        count: t.count
+      }));
+
+    return {
+      title: "Global State of the Feed",
+      date: `Week of ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`,
+      summary: `Our global registry analysis for the past 7 days shows ${slopDocs.length} confirmed AI-generated tweets. The timeline is currently ${Math.round((slopDocs.length / Math.max(recentDocs.length, 1)) * 100)}% sloppy.`,
+      totalSlops: slopDocs.length,
+      topTrends: topTrends.length > 0 ? topTrends : topFactories
+    };
+  };
+
+  const weeklyAudit = getGlobalAudit();
 
   useEffect(() => {
     const fetchRegistryData = async () => {
@@ -39,26 +100,6 @@ function App() {
             trendMap[dateStr] = parseInt(doc.fields.count?.integerValue || 0);
           });
           setTrendStats(trendMap);
-        }
-
-        // 1.7 Fetch Weekly Audits
-        const auditsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/weekly_audits?key=${FIREBASE_CONFIG.apiKey}&pageSize=10&orderBy=created_at desc`;
-        const auditsResponse = await fetch(auditsUrl);
-        if (auditsResponse.ok) {
-          const auditsData = await auditsResponse.json();
-          const audits = (auditsData.documents || []).map(doc => ({
-            id: doc.name.split('/').pop(),
-            title: doc.fields.title?.stringValue || "Weekly State of the Feed",
-            date: doc.fields.date?.stringValue || "Unknown",
-            totalSlops: parseInt(doc.fields.total_slops?.integerValue || 0),
-            summary: doc.fields.summary?.stringValue || "",
-            topTrends: (doc.fields.top_trends?.arrayValue?.values || []).map(v => ({
-              name: v.mapValue.fields.name?.stringValue || "Unknown",
-              score: parseInt(v.mapValue.fields.score?.integerValue || 0),
-              count: parseInt(v.mapValue.fields.count?.integerValue || 0)
-            }))
-          }));
-          setWeeklyAudits(audits);
         }
         
         // 2. Fetch Recent Documents for Wall of Shame & Search (Sorted by update time)
@@ -266,21 +307,21 @@ function App() {
           </div>
         </Tweet>
 
-        {weeklyAudits.length > 0 && (
+        {weeklyAudit && (
           <section id="weekly-audit">
             <Tweet author="ZeroSlop Intelligence" handle="zeroslop_audit">
               <div style={{ background: '#1d9bf01a', padding: '15px', borderRadius: '12px', border: '1px solid #1d9bf04d' }}>
-                <h2 style={{ color: '#1d9bf0', marginBottom: '5px' }}>📊 {weeklyAudits[0].title}</h2>
-                <p style={{ fontSize: '0.9rem', color: '#71767b', marginBottom: '15px' }}>{weeklyAudits[0].date} · Data-driven slop analysis</p>
+                <h2 style={{ color: '#1d9bf0', marginBottom: '5px' }}>📊 {weeklyAudit.title}</h2>
+                <p style={{ fontSize: '0.9rem', color: '#71767b', marginBottom: '15px' }}>{weeklyAudit.date} · Data-driven slop analysis</p>
                 
-                <p style={{ marginBottom: '15px', fontWeight: 'bold' }}>{weeklyAudits[0].summary}</p>
+                <p style={{ marginBottom: '15px', fontWeight: 'bold' }}>{weeklyAudit.summary}</p>
                 
                 <div style={{ background: '#16181c', borderRadius: '12px', overflow: 'hidden', border: '1px solid #2f3336' }}>
                   <div style={{ padding: '12px', borderBottom: '1px solid #2f3336', background: '#1d9bf01a', fontWeight: 'bold' }}>
                     🚩 Bot-Driven Trend Leaderboard
                   </div>
-                  {weeklyAudits[0].topTrends.map((trend, i) => (
-                    <div key={i} style={{ padding: '12px', borderBottom: i === weeklyAudits[0].topTrends.length - 1 ? 'none' : '1px solid #2f3336', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  {weeklyAudit.topTrends.map((trend, i) => (
+                    <div key={i} style={{ padding: '12px', borderBottom: i === weeklyAudit.topTrends.length - 1 ? 'none' : '1px solid #2f3336', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>{i + 1}. {trend.name}</div>
                         <div style={{ fontSize: '0.8rem', color: '#71767b' }}>{trend.count} reports analyzed</div>
@@ -300,7 +341,7 @@ function App() {
                 </div>
                 
                 <div style={{ marginTop: '15px', fontSize: '0.85rem', color: '#71767b', fontStyle: 'italic' }}>
-                  * This week, {weeklyAudits[0].totalSlops} new slop detections were added to the registry. Keep hunting!
+                  * This week, {weeklyAudit.totalSlops} new slop detections were added to the registry. Keep hunting!
                 </div>
               </div>
             </Tweet>

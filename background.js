@@ -90,56 +90,9 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-async function publishWeeklyAudit(auditData) {
-  const dateStr = new Date().toISOString().split('T')[0];
-  const auditId = auditData.id || `audit-${dateStr}`;
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/weekly_audits/${auditId}?key=${FIREBASE_CONFIG.apiKey}`;
-
-  const fields = {
-    title: { stringValue: auditData.title || "Weekly State of the Feed" },
-    date: { stringValue: auditData.date || new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) },
-    summary: { stringValue: auditData.summary || "This week's analysis of trending topics on X (Twitter)." },
-    total_slops: { integerValue: auditData.totalSlops || 0 },
-    created_at: { timestampValue: new Date().toISOString() },
-    top_trends: {
-      arrayValue: {
-        values: auditData.topTrends.map(t => ({
-          mapValue: {
-            fields: {
-              name: { stringValue: t.name },
-              score: { integerValue: Math.round(t.score) },
-              count: { integerValue: t.count }
-            }
-          }
-        }))
-      }
-    }
-  };
-
-  try {
-    const response = await fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields })
-    });
-    return response.ok;
-  } catch (e) {
-    console.error("ZeroSlop: Error publishing audit", e);
-    return false;
-  }
-}
-
 // Handle messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "autoScanTweet") {
-...
-  } else if (request.action === "publishAudit") {
-    publishWeeklyAudit(request.auditData).then(success => {
-      sendResponse({ success });
-    });
-    return true; // Keep message channel open
-  }
-});
     chrome.storage.local.get(['autoScan'], (result) => {
       if (result.autoScan) {
         performDetection(request.text, sender.tab.id, request.tweetId, true, request.author);
