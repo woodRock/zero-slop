@@ -370,7 +370,16 @@ function App() {
                     </div>
                     {weeklyAudit.topFactories.slice(0, 5).map((f, i) => (
                       <div key={i} style={{ padding: '8px 10px', borderBottom: i === 4 ? 'none' : '1px solid #2f3336', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.8rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80px' }}>{f.handle}</span>
+                        <a 
+                          href={`https://x.com/${f.handle.replace('@', '')}`} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          style={{ fontSize: '0.8rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80px', color: 'inherit', textDecoration: 'none' }}
+                          onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
+                          onMouseOut={(e) => e.target.style.textDecoration = 'none'}
+                        >
+                          {f.handle}
+                        </a>
                         <span style={{ fontSize: '0.75rem', color: '#71767b' }}>{f.count} slops</span>
                       </div>
                     ))}
@@ -515,7 +524,16 @@ function App() {
             <div className="search-results" style={{ background: 'var(--twitter-dark-gray)', padding: '10px', borderRadius: '12px', marginTop: '8px' }}>
               {searchResults.slice(0, 5).map((res, i) => (
                 <div key={i} style={{ marginBottom: '12px', fontSize: '0.85rem' }}>
-                  <div style={{ fontWeight: 'bold' }}>{res.handle}</div>
+                  <a 
+                    href={`https://x.com/${res.handle.replace('@', '')}`} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    style={{ fontWeight: 'bold', color: 'inherit', textDecoration: 'none' }}
+                    onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
+                    onMouseOut={(e) => e.target.style.textDecoration = 'none'}
+                  >
+                    {res.handle}
+                  </a>
                   <div style={{ color: '#f4212e' }}>{Math.round(res.score)}% AI Score ({res.count} detections)</div>
                   {res.label && <div style={{ fontSize: '0.7rem', background: '#f4212e', color: 'white', display: 'inline-block', padding: '1px 5px', borderRadius: '4px', marginTop: '3px' }}>{res.label}</div>}
                 </div>
