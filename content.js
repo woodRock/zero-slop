@@ -131,6 +131,29 @@ function injectSlopFactoryBadge(container, handle) {
   if (timeElement && timeElement.parentNode) {
     timeElement.parentNode.appendChild(badge);
   }
+
+  // Handle Auto-Hide for Slop Factories
+  chrome.storage.local.get(['autoHide'], (result) => {
+    const autoHide = result.autoHide || false;
+    if (autoHide) {
+      const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
+      if (contentDiv) {
+        contentDiv.style.filter = 'blur(10px)'; // Slightly more blur for manual factories
+        contentDiv.style.opacity = '0.5';
+        contentDiv.style.transition = 'all 0.3s ease';
+        contentDiv.style.cursor = 'pointer';
+        contentDiv.title = 'Click to reveal confirmed Slop Factory content';
+
+        contentDiv.addEventListener('click', function reveal() {
+          contentDiv.style.filter = 'none';
+          contentDiv.style.opacity = '1';
+          contentDiv.style.cursor = 'default';
+          contentDiv.title = '';
+          contentDiv.removeEventListener('click', reveal);
+        });
+      }
+    }
+  });
 }
 
 function injectSuspiciousBanner(handle, reasonTweetId) {
