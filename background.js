@@ -99,7 +99,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       }
     });
   }
- else if (info.menuItemId === "reportAccount") {
+  else if (info.menuItemId === "reportAccount") {
     chrome.tabs.sendMessage(tab.id, { action: "getProfileText" }, (response) => {
       if (response && response.author && response.author.handle) {
         storeSlopFactoryReport(response.author);
@@ -107,6 +107,15 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           action: "showResult", 
           data: { feedback_message: `Marked ${response.author.handle} as Potential Slop Factory` },
           isAutoScan: false
+        });
+
+        // If we have a tweetId from the context of where they clicked, scan its amplifiers too
+        chrome.tabs.sendMessage(tab.id, { action: "getTweetText" }, (tweetResponse) => {
+          if (tweetResponse && tweetResponse.tweetId) {
+            scanAmplifiers(tweetResponse.tweetId);
+            // Also store this tweet as 100% manual slop since the author is a factory
+            storeSlopTweet(tweetResponse.tweetId, tweetResponse.text, 100, response.author, true);
+          }
         });
       }
     });
@@ -162,6 +171,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     storeSuspiciousAccount(request.handle, request.name, request.pfp, request.tweetId);
   } else if (request.action === "manualReportAccount") {
     storeSlopFactoryReport(request.author);
+  } else if (request.action === "checkSlopAccount") {
+    checkSlopAccount(request.handle).then(data => {
+      if (data) {
+        chrome.tabs.sendMessage(sender.tab.id, {
+          action: "showSlopFactoryWarning",
+          handle: request.handle
+        });
+        sendResponse(data);
+      } else {
+        sendResponse(null);
+      }
+    });
+    return true;
   } else if (request.action === "checkSuspicious") {
     checkSuspiciousAccount(request.handle).then(data => {
       if (data) {
@@ -194,6 +216,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
+async function checkSlopAccount(handle) {
+  const accountId = handle.replace('@', '').toLowerCase();
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+
+  try {
+    const response = await fetch(url);
+    if (response.ok) {
+      const doc = await response.json();
+      return {
+        handle: doc.fields.handle?.stringValue,
+        manual_reports: parseInt(doc.fields.manual_reports?.integerValue || 0)
+      };
+    }
+  } catch (e) {}
+  return null;
+}
 
 async function checkProfileSlop(handle) {
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:runQuery?key=${FIREBASE_CONFIG.apiKey}`;

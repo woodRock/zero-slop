@@ -58,9 +58,80 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         injectSuspiciousBadge(article, request.handle);
       }
     });
+  } else if (request.action === "showSlopFactoryWarning") {
+    injectSlopFactoryBanner(request.handle);
+    const articles = document.querySelectorAll('article');
+    articles.forEach(article => {
+      const info = extractTweetInfo(article);
+      if (info.author?.handle === request.handle) {
+        injectSlopFactoryBadge(article, request.handle);
+      }
+    });
   }
   return true; 
 });
+
+function injectSlopFactoryBanner(handle) {
+  const existing = document.getElementById('zerogpt-slopfactory-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'zerogpt-slopfactory-banner';
+  banner.style.cssText = `
+    background: #000;
+    color: #fff;
+    padding: 12px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 9999;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border-bottom: 2px solid #f4212e;
+  `;
+  banner.innerHTML = `
+    <span>🚩 MANUALLY IDENTIFIED SLOP FACTORY: ${handle}</span>
+    <button id="close-slopfactory-banner" style="background: #f4212e; border: none; color: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Dismiss</button>
+  `;
+
+  document.body.prepend(banner);
+  banner.querySelector('#close-slopfactory-banner').onclick = () => banner.remove();
+}
+
+function injectSlopFactoryBadge(container, handle) {
+  if (!container || container.querySelector('.zerogpt-slopfactory-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-slopfactory-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #000;
+    border: 1px solid #f4212e;
+    vertical-align: middle;
+    line-height: 1;
+    height: 16px;
+    cursor: help;
+  `;
+  badge.innerText = '🚩 SLOP FACTORY';
+  badge.title = 'This account has been manually identified as a Slop Factory by the community.';
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
 
 function injectSuspiciousBanner(handle, reasonTweetId) {
   const existing = document.getElementById('zerogpt-suspicious-banner');
@@ -412,6 +483,7 @@ function initObservers() {
       const handle = '@' + parts[0];
       chrome.runtime.sendMessage({ action: "checkProfileSlop", handle: handle });
       chrome.runtime.sendMessage({ action: "checkSuspicious", handle: handle });
+      chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: handle });
     }
   };
   
@@ -448,9 +520,10 @@ function initObservers() {
               }
             });
             
-            // Check if author is suspicious
+            // Check if author is suspicious or slop factory
             if (info.author?.handle) {
               chrome.runtime.sendMessage({ action: "checkSuspicious", handle: info.author.handle });
+              chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: info.author.handle });
             }
           }
         }
