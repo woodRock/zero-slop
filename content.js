@@ -465,9 +465,9 @@ function initObservers() {
       const match = path.match(/\/status\/(\d+)/);
       if (match) {
         const tweetId = match[1];
-        // Only scrape if the parent tweet is a confirmed slop tweet
+        // Only scrape if the parent tweet is a confirmed slop tweet (threshold: 15%)
         chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: tweetId }, (data) => {
-          if (data && data.ai_score > 70) {
+          if (data && data.ai_score > 15) {
             const userCells = document.querySelectorAll('[data-testid="UserCell"]');
             userCells.forEach(cell => {
               const handleEl = cell.querySelector('span:nth-child(2)');
@@ -512,7 +512,49 @@ function initObservers() {
   retweetObserver.observe(document.body, { childList: true, subtree: true });
 }
 
+function autoScanAmplifiers() {
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('zerogpt_scan') === 'true') {
+    console.log("ZeroSlop: Auto-scanning amplifiers...");
+    
+    // Wait for content to load, then scrape and close
+    let scanCount = 0;
+    const scanInterval = setInterval(() => {
+      const userCells = document.querySelectorAll('[data-testid="UserCell"]');
+      if (userCells.length > 0 || scanCount > 10) {
+        clearInterval(scanInterval);
+        
+        const match = window.location.pathname.match(/\/status\/(\d+)/);
+        const tweetId = match ? match[1] : null;
+
+        userCells.forEach(cell => {
+          const handleEl = cell.querySelector('span:nth-child(2)');
+          if (handleEl && handleEl.innerText.startsWith('@')) {
+            const handle = handleEl.innerText;
+            const nameEl = cell.querySelector('span:nth-child(1)');
+            const pfpEl = cell.querySelector('img');
+            chrome.runtime.sendMessage({
+              action: "reportSuspicious",
+              handle: handle,
+              name: nameEl?.innerText,
+              pfp: pfpEl?.src,
+              tweetId: tweetId
+            });
+          }
+        });
+        
+        console.log(`ZeroSlop: Scanned ${userCells.length} amplifiers. Closing tab.`);
+        setTimeout(() => {
+          chrome.runtime.sendMessage({ action: "closeScanTab" });
+        }, 1000);
+      }
+      scanCount++;
+    }, 1000);
+  }
+}
+
 initObservers();
+autoScanAmplifiers();
 
 async function generateWantedPoster(author, percentage) {
   if (!author) return;

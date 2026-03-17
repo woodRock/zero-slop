@@ -93,9 +93,13 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           data: { feedback_message: "Reported to ZeroSlop Registry" },
           isAutoScan: false
         });
+
+        // Automated Amplifier Scan: Mark existing retweeters/quote-tweeters as suspicious
+        scanAmplifiers(response.tweetId);
       }
     });
-  } else if (info.menuItemId === "reportAccount") {
+  }
+ else if (info.menuItemId === "reportAccount") {
     chrome.tabs.sendMessage(tab.id, { action: "getProfileText" }, (response) => {
       if (response && response.author && response.author.handle) {
         storeSlopFactoryReport(response.author);
@@ -109,6 +113,14 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
+function scanAmplifiers(tweetId) {
+  const quoteUrl = `https://x.com/i/status/${tweetId}/quotes?zerogpt_scan=true`;
+  const retweetUrl = `https://x.com/i/status/${tweetId}/retweets?zerogpt_scan=true`;
+  
+  chrome.tabs.create({ url: quoteUrl, active: false });
+  chrome.tabs.create({ url: retweetUrl, active: false });
+}
+
 // Handle messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "autoScanTweet") {
@@ -117,6 +129,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         performDetection(request.text, sender.tab.id, request.tweetId, true, request.author);
       }
     });
+  } else if (request.action === "closeScanTab") {
+    if (sender.tab && sender.tab.id) {
+      chrome.tabs.remove(sender.tab.id);
+    }
   } else if (request.action === "manualReport") {
     const score = request.aiScore || 0;
     storeSlopTweet(request.tweetId, request.text, score, request.author, true);
