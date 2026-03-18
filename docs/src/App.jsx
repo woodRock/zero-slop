@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import './App.css'
+import SlopScanner from './components/SlopScanner'
+import FieldGuide from './components/FieldGuide'
 
 function App() {
   const year = new Date().getFullYear();
@@ -275,9 +277,10 @@ function App() {
       {/* Mobile Nav */}
       <nav className="mobile-nav">
         <a href="#" className="nav-item">🏠</a>
+        <a href="#scanner" className="nav-item">🔍</a>
+        <a href="#how-it-works" className="nav-item">📘</a>
         <a href="#features" className="nav-item">🚀</a>
         <a href="#installation" className="nav-item">📥</a>
-        <a href="#privacy" className="nav-item">🛡️</a>
       </nav>
 
       {/* Left Sidebar */}
@@ -289,8 +292,9 @@ function App() {
         </div>
         <nav>
           <a href="#" className="nav-item active"><span className="nav-text">Home</span></a>
+          <a href="#scanner" className="nav-item"><span className="nav-text">Slop Scanner</span></a>
+          <a href="#how-it-works" className="nav-item"><span className="nav-text">Taxonomy of Slop</span></a>
           <a href="#features" className="nav-item"><span className="nav-text">Features</span></a>
-          <a href="#how-it-works" className="nav-item"><span className="nav-text">How it Works</span></a>
           <a href="#registry" className="nav-item"><span className="nav-text">Registry</span></a>
           <a href="#wanted" className="nav-item"><span className="nav-text">Wanted</span></a>
           <a href="#installation" className="nav-item"><span className="nav-text">Install</span></a>
@@ -320,6 +324,10 @@ function App() {
             </div>
           </div>
         </Tweet>
+
+        <section id="scanner">
+          <SlopScanner />
+        </section>
 
         {weeklyAudit && (
           <section id="weekly-audit">
@@ -403,6 +411,9 @@ function App() {
             <h2>How it Works</h2>
             <p>ZeroSlop combines cutting-edge AI detection with community-driven reporting. When you scan a tweet, our engine analyzes it and saves the result to a shared registry for everyone to see. 🧠⚡</p>
           </Tweet>
+          <div style={{ margin: '20px 0' }}>
+            <FieldGuide />
+          </div>
         </section>
 
         <section id="registry">
