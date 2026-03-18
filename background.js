@@ -144,7 +144,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
   } else if (request.action === "manualReport") {
     const score = request.aiScore || 0;
-    storeSlopTweet(request.tweetId, request.text, score, request.author, true);
+    storeSlopTweet(request.tweetId, request.text, score, request.author, true, request.slopType, request.extractionResults);
+    if (request.isSlopFactory && request.author) {
+      storeSlopFactoryReport(request.author);
+    }
   } else if (request.action === "voteSlop") {
     voteSlopTweet(request.tweetId, request.voteType);
   } else if (request.action === "checkRegistry") {
@@ -467,7 +470,7 @@ async function updateGlobalStats(fieldName = 'total_slops') {
   }
 }
 
-async function storeSlopTweet(tweetId, text, percentage, author, isManual = false) {
+async function storeSlopTweet(tweetId, text, percentage, author, isManual = false, slopType = null, extractionResults = null) {
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
   
   const fields = {
@@ -476,6 +479,13 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     status: { stringValue: "pending" },
     last_updated: { timestampValue: new Date().toISOString() }
   };
+
+  if (slopType) fields.slop_type = { stringValue: slopType };
+  if (extractionResults) {
+    fields.test_accountability = { booleanValue: !!extractionResults.accountability };
+    fields.test_funnel = { booleanValue: !!extractionResults.funnel };
+    fields.test_replicability = { booleanValue: !!extractionResults.replicability };
+  }
 
   const isSlop = (percentage > 15 || isManual);
 
