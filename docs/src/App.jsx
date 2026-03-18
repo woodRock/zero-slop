@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import './App.css'
-import SlopScanner from './components/SlopScanner'
 import FieldGuide from './components/FieldGuide'
 
 function App() {
@@ -101,11 +100,9 @@ function App() {
   useEffect(() => {
     const fetchRegistryData = async () => {
       try {
-        // 1. Fetch Global Stats
         const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
         const statsResponse = await fetch(statsUrl);
 
-        // 1.5 Fetch Trends Collection
         const trendsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends?key=${FIREBASE_CONFIG.apiKey}&pageSize=100`;
         const trendsResponse = await fetch(trendsUrl);
         if (trendsResponse.ok) {
@@ -118,7 +115,6 @@ function App() {
           setTrendStats(trendMap);
         }
         
-        // 2. Fetch Recent Documents for Wall of Shame & Search (Sorted by update time)
         const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000&orderBy=last_updated desc&t=${Date.now()}`;
         const response = await fetch(url);
         
@@ -174,7 +170,6 @@ function App() {
       return;
     }
     
-    // Aggregate by handle
     const handleMap = {};
     allDocs.forEach(doc => {
       const handle = doc.fields.author_handle?.stringValue;
@@ -204,30 +199,22 @@ function App() {
     setSearchResults(results);
   };
 
-  // Group by day for trends
   const getTrendsData = () => {
     const days = {};
     const docCounts = {};
     const today = new Date();
-
-    // Count from allDocs (last 1000)
     allDocs.forEach(doc => {
       const dateStr = doc.updateTime.split('T')[0];
       docCounts[dateStr] = (docCounts[dateStr] || 0) + 1;
     });
-
-    // Show last 10 days to ensure March 13th is visible
     for (let i = 0; i < 10; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() - i);
       const dateStr = date.toISOString().split('T')[0];
-      // Use the max of our historical trendStats or what we see in the latest 1000 docs
       days[dateStr] = Math.max(trendStats[dateStr] || 0, docCounts[dateStr] || 0);
     }
-
     return Object.entries(days).reverse();
   };
-
 
   const trends = getTrendsData();
   const maxTrend = Math.max(...trends.map(t => t[1]), 1);
@@ -274,16 +261,13 @@ function App() {
 
   return (
     <div className="app-layout">
-      {/* Mobile Nav */}
       <nav className="mobile-nav">
         <a href="#" className="nav-item">🏠</a>
-        <a href="#scanner" className="nav-item">🔍</a>
-        <a href="#how-it-works" className="nav-item">📘</a>
-        <a href="#features" className="nav-item">🚀</a>
+        <a href="#wall-of-shame" className="nav-item">🚩</a>
         <a href="#installation" className="nav-item">📥</a>
+        <a href="#taxonomy" className="nav-item">📘</a>
       </nav>
 
-      {/* Left Sidebar */}
       <aside className="sidebar-left">
         <div className="logo-container">
           <a href="#" className="logo">
@@ -292,24 +276,24 @@ function App() {
         </div>
         <nav>
           <a href="#" className="nav-item active"><span className="nav-text">Home</span></a>
-          <a href="#scanner" className="nav-item"><span className="nav-text">Slop Scanner</span></a>
-          <a href="#how-it-works" className="nav-item"><span className="nav-text">Taxonomy of Slop</span></a>
-          <a href="#features" className="nav-item"><span className="nav-text">Features</span></a>
-          <a href="#registry" className="nav-item"><span className="nav-text">Registry</span></a>
-          <a href="#wanted" className="nav-item"><span className="nav-text">Wanted</span></a>
+          <a href="#wall-of-shame" className="nav-item"><span className="nav-text">Live Detections</span></a>
           <a href="#installation" className="nav-item"><span className="nav-text">Install</span></a>
+          <a href="#taxonomy" className="nav-item"><span className="nav-text">Taxonomy of Slop</span></a>
+          <a href="#features" className="nav-item"><span className="nav-text">Features</span></a>
+          <a href="#how-it-works" className="nav-item"><span className="nav-text">How it Works</span></a>
+          <a href="#wanted" className="nav-item"><span className="nav-text">Wanted Posters</span></a>
           <a href="#faq" className="nav-item"><span className="nav-text">FAQ</span></a>
           <a href="#privacy" className="nav-item"><span className="nav-text">Privacy</span></a>
         </nav>
         <a href="https://twitter.com/intent/tweet?text=Identify%20AI%20slop%20on%20the%20timeline%20with%20ZeroSlop!%20%F0%9F%9B%A1%EF%B8%8F%F0%9F%94%8D%20Check%20it%20out:%20https://github.com/woodrock/zero-slop" target="_blank" className="post-btn">Share on X</a>
       </aside>
 
-      {/* Main Timeline */}
       <main className="main-content">
         <header className="sticky-header">
           <h2>Home</h2>
         </header>
 
+        {/* 1. HERO */}
         <Tweet media={{ type: 'image', src: `${baseUrl}banner.jpg` }}>
           <h2>Welcome to ZeroSlop</h2>
           <p>Instantly detect AI-generated tweets on Twitter (X) using the ZeroGPT Business API. Stop the slop, see the truth. 🔍✨</p>
@@ -325,44 +309,18 @@ function App() {
           </div>
         </Tweet>
 
-        <section id="scanner">
-          <SlopScanner />
-        </section>
-
+        {/* 2. EVIDENCE (Audit + Wall of Shame) */}
         {weeklyAudit && (
           <section id="weekly-audit">
             <Tweet author="ZeroSlop Intelligence" handle="zeroslop_audit">
               <div style={{ background: '#1d9bf01a', padding: '15px', borderRadius: '12px', border: '1px solid #1d9bf04d' }}>
                 <h2 style={{ color: '#1d9bf0', marginBottom: '5px' }}>📊 {weeklyAudit.title}</h2>
                 <p style={{ fontSize: '0.9rem', color: '#71767b', marginBottom: '15px' }}>{weeklyAudit.date} · Data-driven slop analysis</p>
-                
                 <p style={{ marginBottom: '15px', fontWeight: 'bold' }}>{weeklyAudit.summary}</p>
-
-                {/* Daily Volume Chart */}
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '8px', color: '#1d9bf0' }}>📈 Daily Slop Volume (7D)</div>
-                  <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '80px', background: '#16181c', padding: '15px', borderRadius: '12px', border: '1px solid #2f3336' }}>
-                    {weeklyAudit.dailyVolume.map(([date, count], i) => (
-                      <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-                        <div style={{ 
-                          width: '12px', 
-                          height: `${(count / Math.max(...weeklyAudit.dailyVolume.map(v => v[1]), 1)) * 50}px`, 
-                          background: '#f4212e', 
-                          borderRadius: '2px 2px 0 0',
-                          minHeight: count > 0 ? '4px' : '0'
-                        }}></div>
-                        <div style={{ fontSize: '0.6rem', color: '#71767b', marginTop: '4px' }}>{date.split('-')[2]}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
                 
                 <div className="audit-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                  {/* Top Trends */}
                   <div style={{ background: '#16181c', borderRadius: '12px', overflow: 'hidden', border: '1px solid #2f3336' }}>
-                    <div style={{ padding: '10px', borderBottom: '1px solid #2f3336', background: '#1d9bf01a', fontWeight: 'bold', fontSize: '0.85rem' }}>
-                      🚩 Trending Slop
-                    </div>
+                    <div style={{ padding: '10px', borderBottom: '1px solid #2f3336', background: '#1d9bf01a', fontWeight: 'bold', fontSize: '0.85rem' }}>🚩 Trending Slop</div>
                     {weeklyAudit.topTrends.slice(0, 5).map((trend, i) => (
                       <div key={i} style={{ padding: '8px 10px', borderBottom: i === 4 ? 'none' : '1px solid #2f3336', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>{trend.name}</span>
@@ -370,65 +328,20 @@ function App() {
                       </div>
                     ))}
                   </div>
-
-                  {/* Slop Factories */}
                   <div style={{ background: '#16181c', borderRadius: '12px', overflow: 'hidden', border: '1px solid #2f3336' }}>
-                    <div style={{ padding: '10px', borderBottom: '1px solid #2f3336', background: '#f4212e1a', fontWeight: 'bold', fontSize: '0.85rem' }}>
-                      🏭 Slop Factories
-                    </div>
+                    <div style={{ padding: '10px', borderBottom: '1px solid #2f3336', background: '#f4212e1a', fontWeight: 'bold', fontSize: '0.85rem' }}>🏭 Slop Factories</div>
                     {weeklyAudit.topFactories.slice(0, 5).map((f, i) => (
                       <div key={i} style={{ padding: '8px 10px', borderBottom: i === 4 ? 'none' : '1px solid #2f3336', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <a 
-                          href={`https://x.com/${f.handle.replace('@', '')}`} 
-                          target="_blank" 
-                          rel="noopener noreferrer" 
-                          style={{ fontSize: '0.8rem', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80px', color: 'inherit', textDecoration: 'none' }}
-                          onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
-                          onMouseOut={(e) => e.target.style.textDecoration = 'none'}
-                        >
-                          {f.handle}
-                        </a>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>{f.handle}</span>
                         <span style={{ fontSize: '0.75rem', color: '#71767b' }}>{f.count} slops</span>
                       </div>
                     ))}
                   </div>
                 </div>
-                
-                <div style={{ marginTop: '15px', fontSize: '0.85rem', color: '#71767b', fontStyle: 'italic' }}>
-                  * This analysis is generated live from the ZeroSlop Community Registry. Keep hunting!
-                </div>
               </div>
             </Tweet>
           </section>
         )}
-
-        <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-usage-video.mov` }}>
-          <p>Check out ZeroSlop in action! Seamlessly integrated into your X timeline. 👇</p>
-        </Tweet>
-
-        <section id="how-it-works">
-          <Tweet media={{ type: 'image', src: `${baseUrl}architecture-diagram.jpeg` }}>
-            <h2>How it Works</h2>
-            <p>ZeroSlop combines cutting-edge AI detection with community-driven reporting. When you scan a tweet, our engine analyzes it and saves the result to a shared registry for everyone to see. 🧠⚡</p>
-          </Tweet>
-          <div style={{ margin: '20px 0' }}>
-            <FieldGuide />
-          </div>
-        </section>
-
-        <section id="registry">
-          <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-self-reporting.mov` }}>
-            <h2>Community Registry</h2>
-            <p>ZeroSlop is powered by the community. When one user scans a tweet, the result is saved for everyone. Watch how it identifies slop in real-time on a busy thread! 🛡️🤝</p>
-          </Tweet>
-        </section>
-
-        <section id="wanted">
-          <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-wanted-posters.mov` }}>
-            <h2>Wanted Posters</h2>
-            <p>Expose the slop-posters with style! Generate a custom "WANTED" poster for any AI-detected tweet and share it instantly to your clipboard. 🖼️🎨</p>
-          </Tweet>
-        </section>
 
         <section id="wall-of-shame">
           <div className="wall-title">Recent Detections (Wall of Shame)</div>
@@ -439,8 +352,8 @@ function App() {
                   {slop.pfp.startsWith('http') ? <img src={slop.pfp} alt="pfp" style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : slop.pfp}
                 </div>
                 <div className="wall-info">
-                  <div className="wall-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '140px' }}>{slop.name}</div>
-                  <div className="wall-handle" style={{ color: '#71767b', fontSize: '0.75rem' }}>{slop.handle}</div>
+                  <div className="wall-name">{slop.name}</div>
+                  <div className="wall-handle">{slop.handle}</div>
                   <div className="wall-score">{slop.score}% AI</div>
                 </div>
               </div>
@@ -450,42 +363,63 @@ function App() {
           </div>
         </section>
 
-        <section id="features">
-          <Tweet media={{ type: 'image', src: `${baseUrl}zero-slop-right-click.png` }}>
-            <h2>Native Integration</h2>
-            <p>The timeline is being flooded with AI-generated slop. Our extension integrates natively into X to help you identify bot-like behavior instantly.</p>
-            <div className="browser-icons">
-              <span>Works on:</span>
-              <span title="Google Chrome">🌐 Chrome</span>
-              <span title="Microsoft Edge">🌐 Edge</span>
-              <span title="Brave Browser">🌐 Brave</span>
-            </div>
-          </Tweet>
-        </section>
-
+        {/* 3. SOLUTION (CTA) */}
         <section id="installation">
           <Tweet media={{ type: 'image', src: `${baseUrl}zero-slop-result.png` }}>
-            <h2>Installation</h2>
-            <p>Simply add ZeroSlop to your browser from the Chrome Web Store:</p>
+            <h2>Get ZeroSlop</h2>
+            <p>Ready to clean up your feed? Add ZeroSlop to your browser and join the community registry.</p>
             <div style={{ margin: '20px 0' }}>
               <a href="https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab?utm_source=item-share-cb" 
                  target="_blank" 
                  className="btn-inline" 
-                 style={{ fontWeight: 'bold', padding: '10px 20px', backgroundColor: '#1d9bf0', color: 'white', borderRadius: '20px', textDecoration: 'none' }}>
+                 style={{ fontWeight: 'bold', padding: '12px 24px', backgroundColor: '#1d9bf0', color: 'white', borderRadius: '30px', textDecoration: 'none', fontSize: '1.1rem' }}>
                 Add to Chrome
               </a>
             </div>
-            
             <div style={{ borderTop: '1px solid #2f3336', paddingTop: '15px', marginTop: '20px' }}>
               <h3>Optional: Configuration</h3>
-              <p>To perform new scans, you can add your own <strong>ZeroGPT Business API Key</strong>:</p>
-              <p>1. <a href="https://zerogpt.com" target="_blank" style={{ color: '#1d9bf0' }}>Get an API Key from ZeroGPT</a> (and purchase credits as needed).</p>
-              <p>2. Open the ZeroSlop extension popup.</p>
-              <p>3. Paste your key and click <strong>Save</strong>.</p>
-              <p style={{ fontStyle: 'italic', marginTop: '10px', fontSize: '0.9em', color: '#71767b' }}>
-                Note: Previously scanned tweets are cached in our registry and are visible to everyone for free.
-              </p>
+              <p>To perform new scans, add your own <strong>ZeroGPT Business API Key</strong> in the extension popup. Previous scans are free for everyone.</p>
             </div>
+          </Tweet>
+        </section>
+
+        {/* 4. EDUCATION (Taxonomy) */}
+        <section id="taxonomy">
+          <div style={{ margin: '20px 0' }}>
+            <FieldGuide />
+          </div>
+        </section>
+
+        {/* 5. PRODUCT DEMO */}
+        <section id="features">
+          <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-usage-video.mov` }}>
+            <h2>Features & Usage</h2>
+            <p>Seamlessly integrated into your X timeline. Right-click any tweet to analyze it, or scan entire threads and profiles with one click.</p>
+            <div className="browser-icons">
+              <span>Supports: Chrome, Edge, Brave</span>
+            </div>
+          </Tweet>
+        </section>
+
+        {/* 6. TECHNICALS */}
+        <section id="how-it-works">
+          <Tweet media={{ type: 'image', src: `${baseUrl}architecture-diagram.jpeg` }}>
+            <h2>How it Works</h2>
+            <p>ZeroSlop combines cutting-edge AI detection with community-driven reporting. When you scan a tweet, our engine analyzes it and saves the result to a shared registry for everyone to see. 🧠⚡</p>
+          </Tweet>
+        </section>
+
+        <section id="registry">
+          <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-self-reporting.mov` }}>
+            <h2>Community Registry</h2>
+            <p>ZeroSlop is powered by decentralized intelligence. When one user scans a tweet, the result is saved for everyone. Watch it happen live! 🛡️🤝</p>
+          </Tweet>
+        </section>
+
+        <section id="wanted">
+          <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-wanted-posters.mov` }}>
+            <h2>Wanted Posters</h2>
+            <p>Expose the slop-posters with style! Generate a custom "WANTED" poster for any AI-detected tweet and share it instantly. 🖼️🎨</p>
           </Tweet>
         </section>
 
@@ -494,15 +428,11 @@ function App() {
             <h2>Frequently Asked Questions</h2>
             <div className="faq-item">
               <h3>Does this cost money?</h3>
-              <p>The extension is free to download. However, it uses the ZeroGPT Business API which requires credits. You'll need your own API key with a balance to perform new scans.</p>
+              <p>The extension is free. However, performing new scans uses the ZeroGPT API which requires your own API key with credits. Community detections are free to view.</p>
             </div>
             <div className="faq-item">
               <h3>Is it 100% accurate?</h3>
-              <p>AI detection is probabilistic. A high score means the text has strong markers of being AI-generated, while a low score suggests human writing.</p>
-            </div>
-            <div className="faq-item">
-              <h3>What happens when I report a tweet?</h3>
-              <p>Reporting a tweet adds its ID and metadata to our community registry. This allows other users to see the AI score instantly.</p>
+              <p>AI detection is probabilistic. ZeroSlop identifies strong markers of AI generation and industrial engagement farming.</p>
             </div>
           </div>
         </section>
@@ -510,7 +440,7 @@ function App() {
         <section id="privacy">
           <Tweet>
             <h2>Privacy Policy</h2>
-            <p>ZeroSlop is built with a privacy-first mindset. No data is stored on our servers. All processing happens between your browser and the ZeroGPT API.</p>
+            <p>ZeroSlop is built with a privacy-first mindset. No personal data is stored. All processing happens between your browser and the ZeroGPT API.</p>
             <a href="https://github.com/woodrock/zero-slop/blob/main/PRIVACY.md" target="_blank" className="btn-inline">Read full policy →</a>
           </Tweet>
         </section>
@@ -540,8 +470,6 @@ function App() {
                     target="_blank" 
                     rel="noopener noreferrer" 
                     style={{ fontWeight: 'bold', color: 'inherit', textDecoration: 'none' }}
-                    onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
-                    onMouseOut={(e) => e.target.style.textDecoration = 'none'}
                   >
                     {res.handle}
                   </a>
