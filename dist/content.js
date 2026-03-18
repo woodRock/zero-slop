@@ -783,20 +783,48 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
     const info = currentOverlayInfo || extractTweetInfo(lastRightClickedElement);
 
     if (!message.includes('Reported')) {
-      const reportSection = document.createElement('div');
-      reportSection.style.cssText = `
+      // Heuristic Pre-Categorization
+      let suggestedType = "";
+      if (info?.text) {
+        const text = info.text.toLowerCase();
+        if (text.includes('thread') || text.includes('🧵')) suggestedType = "type1";
+        else if (text.includes('passive income') || text.includes('faceless')) suggestedType = "type2";
+        else if (text.includes('my cousin') || text.includes('replies in')) suggestedType = "type3";
+      }
+
+      const reportBtn = document.createElement('button');
+      reportBtn.innerText = '🚩 Report as AI Slop';
+      reportBtn.style.cssText = `
+        background: #f4212e;
+        color: white;
+        border: none;
+        padding: 12px;
+        border-radius: 20px;
+        cursor: pointer;
+        font-weight: bold;
+        width: 100%;
+        font-size: 0.95rem;
+      `;
+
+      const detailsDrawer = document.createElement('div');
+      detailsDrawer.style.cssText = `
+        display: none;
         background: #f7f9f9;
         border-radius: 12px;
         padding: 12px;
         border: 1px solid #e1e8ed;
-        margin-bottom: 8px;
+        margin-top: 5px;
       `;
 
-      const taxonomyLabel = document.createElement('div');
-      taxonomyLabel.innerText = "Categorize (Optional):";
-      taxonomyLabel.style.cssText = "font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; color: #536471;";
-      reportSection.appendChild(taxonomyLabel);
+      const toggleDetails = document.createElement('div');
+      toggleDetails.innerText = "Add Details (Optional) ▾";
+      toggleDetails.style.cssText = "font-size: 0.75rem; color: #536471; cursor: pointer; text-align: center; margin-top: 4px; text-decoration: underline;";
+      toggleDetails.onclick = () => {
+        detailsDrawer.style.display = detailsDrawer.style.display === 'none' ? 'block' : 'none';
+        toggleDetails.innerText = detailsDrawer.style.display === 'none' ? "Add Details (Optional) ▾" : "Hide Details ▴";
+      };
 
+      // Populate Details
       const slopSelect = document.createElement('select');
       slopSelect.style.cssText = "width: 100%; padding: 5px; border-radius: 6px; border: 1px solid #cfd9de; font-size: 0.8rem; margin-bottom: 10px;";
       const defaultOpt = document.createElement('option');
@@ -807,14 +835,10 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
         const opt = document.createElement('option');
         opt.value = t.id;
         opt.text = `${t.emoji} ${t.name}`;
+        if (t.id === suggestedType) opt.selected = true;
         slopSelect.appendChild(opt);
       });
-      reportSection.appendChild(slopSelect);
-
-      const testLabel = document.createElement('div');
-      testLabel.innerText = "Extraction Test (Optional):";
-      testLabel.style.cssText = "font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; color: #536471;";
-      reportSection.appendChild(testLabel);
+      detailsDrawer.appendChild(slopSelect);
 
       const createCheck = (id, label) => {
         const div = document.createElement('label');
@@ -833,27 +857,12 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
       const checkFactory = createCheck('chk-factory', 'Is Slop Factory');
       checkFactory.div.style.color = '#f4212e';
       checkFactory.div.style.fontWeight = 'bold';
-      checkFactory.div.style.marginTop = '8px';
 
-      reportSection.appendChild(check1.div);
-      reportSection.appendChild(check2.div);
-      reportSection.appendChild(check3.div);
-      reportSection.appendChild(checkFactory.div);
+      detailsDrawer.appendChild(check1.div);
+      detailsDrawer.appendChild(check2.div);
+      detailsDrawer.appendChild(check3.div);
+      detailsDrawer.appendChild(checkFactory.div);
 
-      const reportBtn = document.createElement('button');
-      reportBtn.innerText = '🚩 Confirm Report';
-      reportBtn.style.cssText = `
-        background: #f4212e;
-        color: white;
-        border: none;
-        padding: 10px;
-        border-radius: 20px;
-        cursor: pointer;
-        font-weight: bold;
-        width: 100%;
-        font-size: 0.9rem;
-        margin-top: 5px;
-      `;
       reportBtn.onclick = () => {
         if (info) {
           chrome.runtime.sendMessage({
@@ -868,15 +877,17 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
             isSlopFactory: checkFactory.cb.checked,
             ...info
           });
-          reportBtn.innerText = '✅ Reported';
+          reportBtn.innerText = '✅ Reported to Registry';
           reportBtn.style.background = '#00ba7c';
           reportBtn.disabled = true;
-          slopSelect.disabled = true;
-          [check1, check2, check3, checkFactory].forEach(c => c.cb.disabled = true);
+          toggleDetails.remove();
+          detailsDrawer.remove();
         }
       };
-      reportSection.appendChild(reportBtn);
-      btnContainer.appendChild(reportSection);
+
+      btnContainer.appendChild(reportBtn);
+      btnContainer.appendChild(toggleDetails);
+      btnContainer.appendChild(detailsDrawer);
     }
 
     const posterBtn = document.createElement('button');
