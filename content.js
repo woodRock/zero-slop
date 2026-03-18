@@ -925,18 +925,27 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
   `;
   closeBtn.onclick = () => overlay.remove();
 
+  let isHovered = false;
+  overlay.onmouseenter = () => { isHovered = true; };
+  overlay.onmouseleave = () => { isHovered = false; };
+
   overlay.appendChild(closeBtn);
   document.body.appendChild(overlay);
 
   if (type !== 'error') {
-    const timeout = type === 'success' ? 8000 : 4000;
-    setTimeout(() => {
+    const timeoutDuration = type === 'success' ? 8000 : 4000;
+    const attemptHide = () => {
+      if (isHovered) {
+        setTimeout(attemptHide, 2000); // Check again in 2s
+        return;
+      }
       if (overlay.parentNode) {
         overlay.style.opacity = '0';
         overlay.style.transition = 'opacity 0.5s';
         setTimeout(() => overlay.remove(), 500);
       }
-    }, timeout);
+    };
+    setTimeout(attemptHide, timeoutDuration);
   }
 }
 
