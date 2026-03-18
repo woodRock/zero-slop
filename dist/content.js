@@ -885,9 +885,9 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
         }
       };
 
-      btnContainer.appendChild(reportBtn);
       btnContainer.appendChild(toggleDetails);
       btnContainer.appendChild(detailsDrawer);
+      btnContainer.appendChild(reportBtn);
     }
 
     const posterBtn = document.createElement('button');
