@@ -60,6 +60,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
   } else if (request.action === "showSlopFactoryWarning") {
     injectSlopFactoryBanner(request.handle);
+    // Also inject badge in header if on profile
+    injectSlopFactoryHeaderBadge(request.handle);
     const articles = document.querySelectorAll('article');
     articles.forEach(article => {
       const info = extractTweetInfo(article);
@@ -102,6 +104,44 @@ function injectSlopFactoryBanner(handle) {
 
   document.body.prepend(banner);
   banner.querySelector('#close-slopfactory-banner').onclick = () => banner.remove();
+}
+
+function injectSlopFactoryHeaderBadge(handle) {
+  // Try to find the profile header name
+  const userNameHeader = document.querySelector('[data-testid="UserName"]');
+  if (!userNameHeader || userNameHeader.querySelector('.zerogpt-slopfactory-header-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-slopfactory-header-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    margin-top: 4px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #000;
+    border: 2px solid #f4212e;
+    cursor: help;
+  `;
+  badge.innerHTML = `🚩 RED SHIELD: FACTORY <span class="v-up" style="cursor:pointer;margin-left:8px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:4px;">👎</span>`;
+  
+  badge.querySelector('.v-up').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
+    badge.querySelector('.v-up').innerText = '✅';
+  };
+  badge.querySelector('.v-down').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
+    badge.querySelector('.v-down').innerText = '❌';
+  };
+
+  userNameHeader.appendChild(badge);
 }
 
 function injectSlopFactoryBadge(container, handle) {

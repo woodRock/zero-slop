@@ -108,6 +108,12 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
           data: { feedback_message: `Marked ${response.author.handle} as Potential Slop Factory` },
           isAutoScan: false
         });
+        
+        // Immediately show the warning banner and badges
+        chrome.tabs.sendMessage(tab.id, {
+          action: "showSlopFactoryWarning",
+          handle: response.author.handle
+        });
 
         // If we have a tweetId from the context of where they clicked, scan its amplifiers too
         chrome.tabs.sendMessage(tab.id, { action: "getTweetText" }, (tweetResponse) => {
@@ -147,6 +153,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     storeSlopTweet(request.tweetId, request.text, score, request.author, true, request.slopType, request.extractionResults);
     if (request.isSlopFactory && request.author) {
       storeSlopFactoryReport(request.author);
+      chrome.tabs.sendMessage(sender.tab.id, {
+        action: "showSlopFactoryWarning",
+        handle: request.author.handle
+      });
     }
   } else if (request.action === "voteSlop") {
     voteSlopTweet(request.tweetId, request.voteType);
@@ -176,6 +186,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     storeSuspiciousAccount(request.handle, request.name, request.pfp, request.tweetId);
   } else if (request.action === "manualReportAccount") {
     storeSlopFactoryReport(request.author);
+    chrome.tabs.sendMessage(sender.tab.id, {
+      action: "showSlopFactoryWarning",
+      handle: request.author.handle
+    });
   } else if (request.action === "checkSlopAccount") {
     checkSlopAccount(request.handle).then(data => {
       if (data) {
