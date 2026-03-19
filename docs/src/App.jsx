@@ -156,28 +156,37 @@ function App() {
           setTrendStats(trendMap);
         }
         
+        // Combine and calculate stats
+        const allLocalDocs = regRes.ok ? (await regRes.clone().json()).documents || [] : [];
+        const allLocalAccounts = accRes.ok ? (await accRes.clone().json()).documents || [] : [];
+        const allLocalSuspicious = suspRes.ok ? (await suspRes.clone().json()).documents || [] : [];
+
+        let totalCount = allLocalDocs.length + allLocalAccounts.length + allLocalSuspicious.length;
+        let totalAccountsCount = new Set([
+          ...allLocalDocs.map(d => d.fields.author_handle?.stringValue),
+          ...allLocalAccounts.map(d => d.fields.handle?.stringValue),
+          ...allLocalSuspicious.map(d => d.fields.handle?.stringValue)
+        ].filter(Boolean)).size;
+
+        if (statsResponse.ok) {
+          const statsData = await statsResponse.json();
+          const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || 0);
+          const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || 0);
+          
+          totalCount = Math.max(remoteTotal, totalCount);
+          totalAccountsCount = Math.max(remoteAccounts, totalAccountsCount);
+        }
+
+        setStats({
+          count: totalCount.toLocaleString(),
+          accounts: totalAccountsCount.toLocaleString(),
+          rawCount: totalCount
+        });
+
         if (regRes.ok) {
           const data = await regRes.json();
           const documents = data.documents || [];
           
-          let totalCount = documents.length;
-          let totalAccountsCount = new Set(documents.map(d => d.fields.author_handle?.stringValue)).size;
-
-          if (statsResponse.ok) {
-            const statsData = await statsResponse.json();
-            const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || 0);
-            const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || 0);
-            
-            totalCount = Math.max(remoteTotal, totalCount);
-            totalAccountsCount = Math.max(remoteAccounts, totalAccountsCount);
-          }
-
-          setStats({
-            count: totalCount.toLocaleString(),
-            accounts: totalAccountsCount.toLocaleString(),
-            rawCount: totalCount
-          });
-
           const recent = documents
             .map(doc => ({
               name: doc.fields.author_name?.stringValue || "Unknown",
