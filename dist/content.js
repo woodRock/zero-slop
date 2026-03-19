@@ -876,13 +876,25 @@ const SLOP_TYPES = [
   { id: 'type5', name: 'Type 5: Personal Transformation', emoji: '🦋' },
 ];
 
-const HUNTER_HEURISTICS = [
-  { regex: /(thread|🧵|1\/\d+)/gi, label: "Thread Hook" },
-  { regex: /(save this|bookmark|don't miss)/gi, label: "Engagement Bait" },
-  { regex: /(passive income|faceless|blueprint|money machine)/gi, label: "Hustle Pitch" },
-  { regex: /(replies in \d+ days|my cousin|my friend)/gi, label: "Fake Social Proof" },
-  { regex: /(game changer|changing everything|ai prompts)/gi, label: "AI Over-Hype" }
-];
+const SLOP_HEURISTICS = {
+  hardBlocks: [
+    { regex: /follow.{0,40}(dm|send)/gi, label: "Follow-for-DM Loop" },
+    { regex: /comment ["']?\w+/gi, label: "Comment Trigger" },
+    { regex: /free for \d+ (hour|day|hr)/gi, label: "Scarcity Bait" },
+    { regex: /must (follow|be following)/gi, label: "Gated Content" },
+    { regex: /\$[\d,]+.{0,15}(per day|per month|\/day|\/month|\/week|\/hr)/gi, label: "Income Claim" },
+    { regex: /(giveaway|cash giveaway|paypal cash)/gi, label: "Fake Giveaway" },
+    { regex: /faceless (youtube|channel)/gi, label: "YouTube Hustle" },
+    { regex: /normally.{0,15}\$/gi, label: "False Pricing" }
+  ],
+  softSignals: [
+    { regex: /(like).{0,30}(repost|rt|retweet)/gi, points: 1, label: "Engagement Loop" },
+    { regex: /^breaking:/gi, points: 1, label: "Clickbait Opener" },
+    { regex: /no (coding|skills|experience|face|camera|editing)/gi, points: 1, label: "Hustle Buzzwords" },
+    { regex: /[\u{1D400}-\u{1D7FF}]/gu, points: 1, label: "Bold Unicode Spam" },
+    { regex: /(save (this|for later)|bookmark this)/gi, points: 0.5, label: "Save/Bookmark Bait" }
+  ]
+};
 
 function highlightSlopMarkers(element) {
   if (!element) return;
@@ -893,13 +905,32 @@ function highlightSlopMarkers(element) {
     if (!result.hunterVision) return;
 
     let html = tweetTextDiv.innerHTML;
+    let text = tweetTextDiv.innerText;
     let found = false;
+    let score = 0;
+    
+    // Check UTC Window (00-07 UTC is high risk)
+    const hour = new Date().getUTCHours();
+    if (hour >= 0 && hour <= 7) score += 0.5;
 
-    HUNTER_HEURISTICS.forEach(h => {
-      if (h.regex.test(tweetTextDiv.innerText)) {
+    // 1. Hard Blocks (Precision 1.00)
+    SLOP_HEURISTICS.hardBlocks.forEach(h => {
+      if (h.regex.test(text)) {
         html = html.replace(h.regex, (match) => {
           found = true;
-          return `<span style="background: rgba(244, 33, 46, 0.2); border-bottom: 2px solid #f4212e; color: #f4212e; font-weight: bold;" title="Bounty Hunter Detection: ${h.label}">${match}</span>`;
+          score += 5; // Automatic flag
+          return `<span style="background: rgba(244, 33, 46, 0.25); border-bottom: 2px solid #f4212e; color: #f4212e; font-weight: bold;" title="HARD BLOCK: ${h.label}">${match}</span>`;
+        });
+      }
+    });
+
+    // 2. Soft Signals (Weighted)
+    SLOP_HEURISTICS.softSignals.forEach(s => {
+      if (s.regex.test(text)) {
+        html = html.replace(s.regex, (match) => {
+          found = true;
+          score += s.points;
+          return `<span style="background: rgba(255, 215, 0, 0.15); border-bottom: 2px dashed #ffd700; color: #ffd700;" title="SOFT SIGNAL: ${s.label} (+${s.points} pts)">${match}</span>`;
         });
       }
     });
@@ -907,6 +938,14 @@ function highlightSlopMarkers(element) {
     if (found) {
       tweetTextDiv.innerHTML = html;
       tweetTextDiv.dataset.hunterVision = "true";
+      
+      // If score is high (> 3), add a small diagnostic indicator
+      if (score >= 3) {
+        const diagnostic = document.createElement('div');
+        diagnostic.innerText = `🚩 Heuristic Slop Score: ${score.toFixed(1)}`;
+        diagnostic.style.cssText = "font-size: 10px; color: #f4212e; margin-top: 4px; font-weight: bold; opacity: 0.8;";
+        tweetTextDiv.parentElement.appendChild(diagnostic);
+      }
     }
   });
 }

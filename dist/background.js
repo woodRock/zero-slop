@@ -331,52 +331,61 @@ async function checkRegistry(tweetId) {
 
 async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
   const accountId = author.handle.replace('@', '').toLowerCase();
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+  const baseUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
 
   try {
-    const getResponse = await fetch(url);
-    let currentReports = 0;
-    let existingFields = {};
-
-    if (getResponse.ok) {
-      const doc = await getResponse.json();
-      existingFields = doc.fields || {};
-      currentReports = parseInt(existingFields.manual_reports?.integerValue || 0);
-    } else {
-      // New account detected!
+    // 1. First, check if document exists to track total_accounts correctly
+    const getResponse = await fetch(baseUrl);
+    if (!getResponse.ok) {
       updateGlobalStats('total_accounts');
     }
 
-    // Every factory report is a slop detection event
-    updateGlobalStats('total_slops');
-    incrementSlopsCaught();
-
+    // 2. Set/Update metadata using PATCH (Non-atomic for text fields is fine)
     const fields = {
-      ...existingFields,
       handle: { stringValue: author.handle },
       name: { stringValue: author.name || "" },
       pfp: { stringValue: author.pfp || "" },
-      manual_reports: { integerValue: currentReports + 1 },
-      last_reported: { timestampValue: new Date().toISOString() },
-      shield_type: { stringValue: shieldType === 'shield-red' ? 'red' : shieldType === 'shield-blue' ? 'blue' : 'none' }
+      shield_type: { stringValue: shieldType === 'shield-red' ? 'red' : shieldType === 'shield-blue' ? 'blue' : 'none' },
+      last_reported: { timestampValue: new Date().toISOString() }
     };
-
-    if (!existingFields.first_detected) {
-      fields.first_detected = { timestampValue: new Date().toISOString() };
-    }
 
     let maskParams = "";
     Object.keys(fields).forEach(key => {
       maskParams += `&updateMask.fieldPaths=${key}`;
     });
 
-    await fetch(url + maskParams, {
+    await fetch(baseUrl + maskParams, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fields })
     });
+
+    // 3. Atomically increment the report counter
+    const body = {
+      writes: [{
+        transform: {
+          document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}`,
+          fieldTransforms: [{
+            fieldPath: "manual_reports",
+            integerIncrement: { integerValue: 1 }
+          }]
+        }
+      }]
+    };
+
+    await fetch(commitUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    // Global stats update
+    updateGlobalStats('total_slops');
+    incrementSlopsCaught();
+
   } catch (e) {
-    console.error("ZeroSlop: Error reporting slop factory", e);
+    console.error("ZeroSlop: Error reporting slop factory (atomic)", e);
   }
 }
 
@@ -435,29 +444,31 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
 
 async function updateDailyTrend() {
   const dateStr = new Date().toISOString().split('T')[0];
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends/${dateStr}?key=${FIREBASE_CONFIG.apiKey}&updateMask.fieldPaths=count&updateMask.fieldPaths=last_updated`;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
+
+  const body = {
+    writes: [{
+      transform: {
+        document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends/${dateStr}`,
+        fieldTransforms: [{
+          fieldPath: "count",
+          integerIncrement: { integerValue: 1 }
+        }, {
+          fieldPath: "last_updated",
+          setToServerValue: "REQUEST_TIME"
+        }]
+      }
+    }]
+  };
 
   try {
-    const getResponse = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends/${dateStr}?key=${FIREBASE_CONFIG.apiKey}`);
-    let currentCount = 0;
-
-    if (getResponse.ok) {
-      const doc = await getResponse.json();
-      currentCount = parseInt(doc.fields.count?.integerValue || 0);
-    }
-
-    const fields = {
-      count: { integerValue: currentCount + 1 },
-      last_updated: { timestampValue: new Date().toISOString() }
-    };
-
     await fetch(url, {
-      method: "PATCH",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields })
+      body: JSON.stringify(body)
     });
   } catch (e) {
-    console.error("ZeroSlop: Error updating daily trend", e);
+    console.error("ZeroSlop: Error updating daily trend (atomic)", e);
   }
 }
 
@@ -465,38 +476,31 @@ async function updateGlobalStats(fieldName = 'total_slops') {
   if (fieldName === 'total_slops') {
     updateDailyTrend();
   }
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}&updateMask.fieldPaths=${fieldName}&updateMask.fieldPaths=last_updated`;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
+
+  const body = {
+    writes: [{
+      transform: {
+        document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global`,
+        fieldTransforms: [{
+          fieldPath: fieldName,
+          integerIncrement: { integerValue: 1 }
+        }, {
+          fieldPath: "last_updated",
+          setToServerValue: "REQUEST_TIME"
+        }]
+      }
+    }]
+  };
 
   try {
-    const getResponse = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`);
-    let currentCount = 0;
-    let existingFields = {};
-
-    if (getResponse.ok) {
-      const doc = await getResponse.json();
-      existingFields = doc.fields || {};
-      currentCount = parseInt(existingFields[fieldName]?.integerValue || 0);
-    }
-
-    const fields = {
-      ...existingFields,
-      [fieldName]: { integerValue: currentCount + 1 },
-      last_updated: { timestampValue: new Date().toISOString() }
-    };
-
-    // Only PATCH the fields we want to update
-    const patchFields = {
-      [fieldName]: { integerValue: currentCount + 1 },
-      last_updated: { timestampValue: new Date().toISOString() }
-    };
-
     await fetch(url, {
-      method: "PATCH",
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields: patchFields })
+      body: JSON.stringify(body)
     });
   } catch (e) {
-    console.error(`ZeroSlop: Error updating global stats for ${fieldName}`, e);
+    console.error(`ZeroSlop: Error updating global stats for ${fieldName} (atomic)`, e);
   }
 }
 
@@ -584,60 +588,56 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
 
 async function voteSlopAccount(handle, voteType) {
   const accountId = handle.replace('@', '').toLowerCase();
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
   
+  const fieldName = voteType === 'up' ? 'upvotes' : 'downvotes';
+  const body = {
+    writes: [{
+      transform: {
+        document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}`,
+        fieldTransforms: [{
+          fieldPath: fieldName,
+          integerIncrement: { integerValue: 1 }
+        }]
+      }
+    }]
+  };
+
   try {
-    const getResponse = await fetch(url);
-    if (!getResponse.ok) return;
-    const doc = await getResponse.json();
-    
-    const fields = {};
-    if (voteType === 'up') {
-      const currentUp = doc.fields.upvotes?.integerValue || 0;
-      fields.upvotes = { integerValue: parseInt(currentUp) + 1 };
-    } else {
-      const currentDown = doc.fields.downvotes?.integerValue || 0;
-      fields.downvotes = { integerValue: parseInt(currentDown) + 1 };
-    }
-    
-    let maskParams = `&updateMask.fieldPaths=${voteType === 'up' ? 'upvotes' : 'downvotes'}`;
-    
-    await fetch(url + maskParams, {
-      method: "PATCH",
+    await fetch(url, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields })
+      body: JSON.stringify(body)
     });
   } catch (e) {
-    console.error("ZeroSlop: Error voting for account", e);
+    console.error("ZeroSlop: Error voting for account (atomic)", e);
   }
 }
 
 async function voteSlopTweet(tweetId, voteType) {
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
   
+  const fieldName = voteType === 'up' ? 'upvotes' : 'downvotes';
+  const body = {
+    writes: [{
+      transform: {
+        document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}`,
+        fieldTransforms: [{
+          fieldPath: fieldName,
+          integerIncrement: { integerValue: 1 }
+        }]
+      }
+    }]
+  };
+
   try {
-    const getResponse = await fetch(url);
-    if (!getResponse.ok) return;
-    const doc = await getResponse.json();
-    
-    const fields = {};
-    if (voteType === 'up') {
-      const currentUp = doc.fields.upvotes?.integerValue || 0;
-      fields.upvotes = { integerValue: parseInt(currentUp) + 1 };
-    } else {
-      const currentDown = doc.fields.downvotes?.integerValue || 0;
-      fields.downvotes = { integerValue: parseInt(currentDown) + 1 };
-    }
-    
-    let maskParams = `&updateMask.fieldPaths=${voteType === 'up' ? 'upvotes' : 'downvotes'}`;
-    
-    await fetch(url + maskParams, {
-      method: "PATCH",
+    await fetch(url, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields })
+      body: JSON.stringify(body)
     });
   } catch (e) {
-    console.error("ZeroSlop: Error voting", e);
+    console.error("ZeroSlop: Error voting for tweet (atomic)", e);
   }
 }
 
