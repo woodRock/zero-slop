@@ -151,10 +151,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "manualReport") {
     const score = request.aiScore || 0;
     storeSlopTweet(request.tweetId, request.text, score, request.author, true, request.slopType, request.extractionResults);
-    if (request.isSlopFactory && request.author) {
-      storeSlopFactoryReport(request.author);
+    
+    if (request.shieldType && request.author) {
+      storeSlopFactoryReport(request.author, request.shieldType);
+      
+      const action = request.shieldType === 'shield-red' ? "showSlopFactoryWarning" : "showHighAIWarning";
       chrome.tabs.sendMessage(sender.tab.id, {
-        action: "showSlopFactoryWarning",
+        action: action,
         handle: request.author.handle
       });
     }
@@ -193,8 +196,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "checkSlopAccount") {
     checkSlopAccount(request.handle).then(data => {
       if (data) {
+        const action = data.shield_type === 'blue' ? "showHighAIWarning" : "showSlopFactoryWarning";
         chrome.tabs.sendMessage(sender.tab.id, {
-          action: "showSlopFactoryWarning",
+          action: action,
           handle: request.handle
         });
         sendResponse(data);
@@ -246,7 +250,8 @@ async function checkSlopAccount(handle) {
       const doc = await response.json();
       return {
         handle: doc.fields.handle?.stringValue,
-        manual_reports: parseInt(doc.fields.manual_reports?.integerValue || 0)
+        manual_reports: parseInt(doc.fields.manual_reports?.integerValue || 0),
+        shield_type: doc.fields.shield_type?.stringValue || 'red'
       };
     }
   } catch (e) {}
@@ -324,7 +329,7 @@ async function checkRegistry(tweetId) {
   return null;
 }
 
-async function storeSlopFactoryReport(author) {
+async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
   const accountId = author.handle.replace('@', '').toLowerCase();
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
 
@@ -345,7 +350,8 @@ async function storeSlopFactoryReport(author) {
       name: { stringValue: author.name || "" },
       pfp: { stringValue: author.pfp || "" },
       manual_reports: { integerValue: currentReports + 1 },
-      last_reported: { timestampValue: new Date().toISOString() }
+      last_reported: { timestampValue: new Date().toISOString() },
+      shield_type: { stringValue: shieldType === 'shield-red' ? 'red' : shieldType === 'shield-blue' ? 'blue' : 'none' }
     };
 
     if (!existingFields.first_detected) {

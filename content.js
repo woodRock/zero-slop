@@ -69,6 +69,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         injectSlopFactoryBadge(article, request.handle);
       }
     });
+  } else if (request.action === "showHighAIWarning") {
+    injectHighAIBanner(request.handle);
+    injectHighAIHeaderBadge(request.handle);
+    const articles = document.querySelectorAll('article');
+    articles.forEach(article => {
+      const info = extractTweetInfo(article);
+      if (info.author?.handle === request.handle) {
+        injectHighAIBadge(article, request.handle);
+      }
+    });
   }
   return true; 
 });
@@ -188,6 +198,116 @@ function injectSlopFactoryBadge(container, handle) {
 
   // Handle Auto-Action for Slop Factories
   handleAutoAction(container, 100);
+}
+
+function injectHighAIBanner(handle) {
+  const existing = document.getElementById('zerogpt-highai-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'zerogpt-highai-banner';
+  banner.style.cssText = `
+    background: #1d9bf0;
+    color: #fff;
+    padding: 12px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 9999;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+  `;
+  banner.innerHTML = `
+    <span>🔵 BLUE SHIELD: HIGH AI USAGE (${handle})</span>
+    <button id="close-highai-banner" style="background: rgba(255,255,255,0.2); border: none; color: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Dismiss</button>
+  `;
+
+  document.body.prepend(banner);
+  banner.querySelector('#close-highai-banner').onclick = () => banner.remove();
+}
+
+function injectHighAIHeaderBadge(handle) {
+  const userNameHeader = document.querySelector('[data-testid="UserName"]');
+  if (!userNameHeader || userNameHeader.querySelector('.zerogpt-highai-header-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-highai-header-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    margin-top: 4px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #000;
+    border: 2px solid #1d9bf0;
+    cursor: help;
+  `;
+  badge.innerHTML = `🔵 BLUE SHIELD: HIGH AI <span class="v-up" style="cursor:pointer;margin-left:8px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:4px;">👎</span>`;
+  
+  badge.querySelector('.v-up').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
+    badge.querySelector('.v-up').innerText = '✅';
+  };
+  badge.querySelector('.v-down').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
+    badge.querySelector('.v-down').innerText = '❌';
+  };
+
+  userNameHeader.appendChild(badge);
+}
+
+function injectHighAIBadge(container, handle) {
+  if (!container || container.querySelector('.zerogpt-highai-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-highai-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #000;
+    border: 1px solid #1d9bf0;
+    vertical-align: middle;
+    line-height: 1;
+    height: 16px;
+    cursor: help;
+  `;
+  badge.innerHTML = `🔵 BLUE SHIELD: HIGH AI <span class="v-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
+
+  badge.querySelector('.v-up').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
+    badge.querySelector('.v-up').innerText = '✅';
+  };
+  badge.querySelector('.v-down').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
+    badge.querySelector('.v-down').innerText = '❌';
+  };
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
 }
 
 function injectSuspiciousBanner(handle, reasonTweetId) {
@@ -943,17 +1063,40 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
       const check1 = createCheck('chk-acc', 'No accountable author');
       const check2 = createCheck('chk-fun', 'Contains funnel/CTA');
       const check3 = createCheck('chk-rep', 'Not replicable/Fake');
-      const checkFactory = createCheck('chk-factory', 'Is Slop Factory');
-      checkFactory.div.style.color = '#f4212e';
-      checkFactory.div.style.fontWeight = 'bold';
+      const shieldLabel = document.createElement('div');
+      shieldLabel.innerText = "Shield Type (Optional):";
+      shieldLabel.style.cssText = "font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; color: #536471; margin-top: 8px;";
+      detailsDrawer.appendChild(shieldLabel);
 
-      detailsDrawer.appendChild(check1.div);
-      detailsDrawer.appendChild(check2.div);
-      detailsDrawer.appendChild(check3.div);
-      detailsDrawer.appendChild(checkFactory.div);
+      const shieldContainer = document.createElement('div');
+      shieldContainer.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;";
+      
+      const createShieldOption = (id, label, color) => {
+        const div = document.createElement('label');
+        div.style.cssText = `display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; color: ${color}; font-weight: bold;`;
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'shield-type';
+        radio.id = id;
+        radio.value = id;
+        div.appendChild(radio);
+        div.appendChild(document.createTextNode(label));
+        return { div, radio };
+      };
+
+      const optRed = createShieldOption('shield-red', '🚩 RED: Slop Factory', '#f4212e');
+      const optBlue = createShieldOption('shield-blue', '🔵 BLUE: High AI Usage', '#1d9bf0');
+      const optNone = createShieldOption('shield-none', '⚪ None (General Slop)', '#71767b');
+      optNone.radio.checked = true;
+
+      shieldContainer.appendChild(optRed.div);
+      shieldContainer.appendChild(optBlue.div);
+      shieldContainer.appendChild(optNone.div);
+      detailsDrawer.appendChild(shieldContainer);
 
       reportBtn.onclick = () => {
         if (info) {
+          const selectedShield = detailsDrawer.querySelector('input[name="shield-type"]:checked').value;
           chrome.runtime.sendMessage({
             action: "manualReport",
             aiScore: currentAiScore,
@@ -963,7 +1106,7 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
               funnel: check2.cb.checked,
               replicability: check3.cb.checked
             },
-            isSlopFactory: checkFactory.cb.checked,
+            shieldType: selectedShield,
             ...info
           });
           reportBtn.innerText = '✅ Reported to Registry';
