@@ -3,6 +3,7 @@ import './App.css'
 import FieldGuide from './components/FieldGuide'
 import SlopCycle from './components/SlopCycle'
 import SlopMap from './components/SlopMap'
+import FeedAuditor from './components/FeedAuditor'
 
 function App() {
   const year = new Date().getFullYear();
@@ -359,6 +360,7 @@ function App() {
       <nav className="mobile-nav">
         <a href="#" className="nav-item">🏠</a>
         <a href="#wall-of-shame" className="nav-item">🚩</a>
+        <a href="#auditor" className="nav-item">🕵️</a>
         <a href="#installation" className="nav-item">📥</a>
         <a href="#taxonomy" className="nav-item">📘</a>
       </nav>
@@ -373,6 +375,7 @@ function App() {
           <a href="#" className="nav-item active"><span className="nav-text">Home</span></a>
           <a href="#factory" className="nav-item"><span className="nav-text">Inside the Factory</span></a>
           <a href="#wall-of-shame" className="nav-item"><span className="nav-text">Live Detections</span></a>
+          <a href="#auditor" className="nav-item"><span className="nav-text">Feed Auditor</span></a>
           <a href="#installation" className="nav-item"><span className="nav-text">Install</span></a>
           <a href="#taxonomy" className="nav-item"><span className="nav-text">Taxonomy of Slop</span></a>
           <a href="#features" className="nav-item"><span className="nav-text">Features</span></a>
@@ -478,6 +481,11 @@ function App() {
               <div style={{ padding: '20px', color: '#71767b', textAlign: 'center', width: '100%' }}>Loading slop reports...</div>
             )}
           </div>
+        </section>
+
+        {/* 2.5 NETWORK AUDIT */}
+        <section id="auditor">
+          <FeedAuditor database={allAccounts} />
         </section>
 
         {/* 3. SOLUTION (CTA) */}
