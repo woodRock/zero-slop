@@ -124,7 +124,7 @@ function injectSlopFactoryBadge(container, handle) {
     height: 16px;
     cursor: help;
   `;
-  badge.innerText = '🚩 SLOP FACTORY';
+  badge.innerText = '🚩 RED SHIELD: FACTORY';
   badge.title = 'This account has been manually identified as a Slop Factory by the community.';
 
   const timeElement = container.querySelector('time');
@@ -209,7 +209,7 @@ function injectSuspiciousBadge(container, handle) {
     height: 16px;
     cursor: help;
   `;
-  badge.innerText = '⚠️ POTENTIAL BOT';
+  badge.innerText = '⚠️ ORANGE SHIELD: SUSPICIOUS';
   badge.title = 'This account has recently interacted with AI-slop factories.';
 
   const timeElement = container.querySelector('time');
