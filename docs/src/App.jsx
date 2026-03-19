@@ -545,19 +545,44 @@ function App() {
                 onClick={() => {
                   const pass = prompt("Enter researcher password to unlock download:");
                   if (pass === "zeroslop-research-2026") {
-                    // Logic to generate and download CSV
+                    // Robust CSV escaping helper
+                    const escapeCSV = (str) => {
+                      if (!str) return '""';
+                      const clean = str.toString().replace(/"/g, '""').replace(/\n/g, ' ');
+                      return `"${clean}"`;
+                    };
+
                     const csvRows = [
                       ["Type", "Handle", "Text", "AI Score", "Detected At"],
-                      ...allDocs.map(d => ["Tweet", d.fields.author_handle?.stringValue, d.fields.text?.stringValue?.replace(/,/g, ""), d.fields.ai_score?.doubleValue || 0, d.updateTime]),
-                      ...allAccounts.map(d => ["Factory", d.fields.handle?.stringValue, "N/A", 100, d.updateTime]),
-                      ...allSuspicious.map(d => ["Amplifier", d.fields.handle?.stringValue, "N/A", 50, d.updateTime])
+                      ...allDocs.map(d => [
+                        "Tweet", 
+                        escapeCSV(d.fields.author_handle?.stringValue), 
+                        escapeCSV(d.fields.text?.stringValue), 
+                        d.fields.ai_score?.doubleValue || 0, 
+                        escapeCSV(d.updateTime)
+                      ]),
+                      ...allAccounts.map(d => [
+                        "Factory", 
+                        escapeCSV(d.fields.handle?.stringValue), 
+                        "N/A", 
+                        100, 
+                        escapeCSV(d.updateTime)
+                      ]),
+                      ...allSuspicious.map(d => [
+                        "Amplifier", 
+                        escapeCSV(d.fields.handle?.stringValue), 
+                        "N/A", 
+                        50, 
+                        escapeCSV(d.updateTime)
+                      ])
                     ];
                     
-                    const csvContent = "data:text/csv;charset=utf-8," + csvRows.map(e => e.join(",")).join("\n");
-                    const encodedUri = encodeURI(csvContent);
+                    const csvContent = csvRows.map(e => e.join(",")).join("\n");
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
                     const link = document.createElement("a");
-                    link.setAttribute("href", encodedUri);
-                    link.setAttribute("download", "zeroslop_community_dataset.csv");
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", `zeroslop_dataset_${new Date().toISOString().split('T')[0]}.csv`);
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
