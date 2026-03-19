@@ -30,14 +30,18 @@ function App() {
   const findAmplifiersForHandle = (handle) => {
     const target = handle.toLowerCase().replace('@', '');
     
-    // 1. Find all tweet IDs from this factory (case-insensitive)
+    // 1. Find all tweet IDs from this factory
     const factoryTweets = allDocs
       .filter(doc => (doc.fields.author_handle?.stringValue || "").toLowerCase().replace('@', '') === target)
       .map(doc => doc.fields.tweet_id?.stringValue);
 
-    // 2. Find all suspicious accounts that were caught on those tweets
+    // 2. Find real amplifiers (Check by factory_handle field OR reason_tweet_id)
     const realAmplifiers = allSuspicious
-      .filter(susp => factoryTweets.includes(susp.fields.reason_tweet_id?.stringValue))
+      .filter(susp => {
+        const suspFactory = (susp.fields.factory_handle?.stringValue || "").toLowerCase().replace('@', '');
+        const reasonId = susp.fields.reason_tweet_id?.stringValue;
+        return (suspFactory === target) || (reasonId && factoryTweets.includes(reasonId));
+      })
       .map(susp => ({
         handle: susp.fields.handle?.stringValue,
         type: "Caught Amplifying",

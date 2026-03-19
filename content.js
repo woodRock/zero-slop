@@ -577,8 +577,10 @@ function initObservers() {
       const match = path.match(/\/status\/(\d+)/);
       if (match) {
         const tweetId = match[1];
-        // Only scrape if the parent tweet is a confirmed slop tweet (threshold: 15%)
+        // Find the author handle of the parent tweet from the background registry or current page
         chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: tweetId }, (data) => {
+          const factoryHandle = data?.author_handle;
+          
           if (data && data.ai_score > 15) {
             const userCells = document.querySelectorAll('[data-testid="UserCell"]');
             userCells.forEach(cell => {
@@ -592,7 +594,8 @@ function initObservers() {
                   handle: handle,
                   name: nameEl?.innerText,
                   pfp: pfpEl?.src,
-                  tweetId: tweetId
+                  tweetId: tweetId,
+                  factoryHandle: factoryHandle
                 });
               }
             });
@@ -639,20 +642,26 @@ function autoScanAmplifiers() {
         const match = window.location.pathname.match(/\/status\/(\d+)/);
         const tweetId = match ? match[1] : null;
 
-        userCells.forEach(cell => {
-          const handleEl = cell.querySelector('span:nth-child(2)');
-          if (handleEl && handleEl.innerText.startsWith('@')) {
-            const handle = handleEl.innerText;
-            const nameEl = cell.querySelector('span:nth-child(1)');
-            const pfpEl = cell.querySelector('img');
-            chrome.runtime.sendMessage({
-              action: "reportSuspicious",
-              handle: handle,
-              name: nameEl?.innerText,
-              pfp: pfpEl?.src,
-              tweetId: tweetId
-            });
-          }
+        // Try to find the author handle from the registry before reporting bots
+        chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: tweetId }, (regData) => {
+          const factoryHandle = regData?.author_handle;
+
+          userCells.forEach(cell => {
+            const handleEl = cell.querySelector('span:nth-child(2)');
+            if (handleEl && handleEl.innerText.startsWith('@')) {
+              const handle = handleEl.innerText;
+              const nameEl = cell.querySelector('span:nth-child(1)');
+              const pfpEl = cell.querySelector('img');
+              chrome.runtime.sendMessage({
+                action: "reportSuspicious",
+                handle: handle,
+                name: nameEl?.innerText,
+                pfp: pfpEl?.src,
+                tweetId: tweetId,
+                factoryHandle: factoryHandle
+              });
+            }
+          });
         });
         
         console.log(`ZeroSlop: Scanned ${userCells.length} amplifiers. Closing tab.`);

@@ -183,7 +183,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
   } else if (request.action === "reportSuspicious") {
-    storeSuspiciousAccount(request.handle, request.name, request.pfp, request.tweetId);
+    storeSuspiciousAccount(request.handle, request.name, request.pfp, request.tweetId, request.factoryHandle);
   } else if (request.action === "manualReportAccount") {
     storeSlopFactoryReport(request.author);
     chrome.tabs.sendMessage(sender.tab.id, {
@@ -316,7 +316,8 @@ async function checkRegistry(tweetId) {
         ai_score: fields.ai_score?.doubleValue || fields.ai_score?.integerValue || 0,
         status: fields.status?.stringValue,
         upvotes: parseInt(fields.upvotes?.integerValue || 0),
-        downvotes: parseInt(fields.downvotes?.integerValue || 0)
+        downvotes: parseInt(fields.downvotes?.integerValue || 0),
+        author_handle: fields.author_handle?.stringValue
       };
     }
   } catch (e) {}
@@ -641,7 +642,7 @@ function saveToHistory(text, percentage, words) {
   });
 }
 
-async function storeSuspiciousAccount(handle, name, pfp, tweetId) {
+async function storeSuspiciousAccount(handle, name, pfp, tweetId, factoryHandle = null) {
   const accountId = handle.replace('@', '').toLowerCase();
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
 
@@ -649,9 +650,13 @@ async function storeSuspiciousAccount(handle, name, pfp, tweetId) {
     handle: { stringValue: handle },
     name: { stringValue: name || "" },
     pfp: { stringValue: pfp || "" },
-    reason_tweet_id: { stringValue: tweetId },
+    reason_tweet_id: { stringValue: tweetId || "" },
     detected_at: { timestampValue: new Date().toISOString() }
   };
+
+  if (factoryHandle) {
+    fields.factory_handle = { stringValue: factoryHandle };
+  }
 
   try {
     await fetch(url, {
