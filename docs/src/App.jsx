@@ -369,6 +369,7 @@ function App() {
           <a href="#taxonomy" className="nav-item"><span className="nav-text">Taxonomy of Slop</span></a>
           <a href="#features" className="nav-item"><span className="nav-text">Features</span></a>
           <a href="#how-it-works" className="nav-item"><span className="nav-text">How it Works</span></a>
+          <a href="#research-data" className="nav-item"><span className="nav-text">Research Data</span></a>
           <a href="#wanted" className="nav-item"><span className="nav-text">Wanted Posters</span></a>
           <a href="#faq" className="nav-item"><span className="nav-text">FAQ</span></a>
           <a href="#privacy" className="nav-item"><span className="nav-text">Privacy</span></a>
@@ -521,6 +522,58 @@ function App() {
           <Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-self-reporting.mov` }}>
             <h2>Community Registry</h2>
             <p>ZeroSlop is powered by decentralized intelligence. When one user scans a tweet, the result is saved for everyone. Watch it happen live! 🛡️🤝</p>
+          </Tweet>
+        </section>
+
+        <section id="research-data">
+          <Tweet author="ZeroSlop Research" handle="zeroslop_data">
+            <div style={{ background: '#1d9bf01a', padding: '20px', borderRadius: '12px', border: '1px solid #1d9bf04d' }}>
+              <h2 style={{ color: '#1d9bf0', marginBottom: '10px' }}>🧬 Research Dataset v1.3</h2>
+              <p style={{ marginBottom: '15px' }}>
+                Our community-curated dataset of AI slop, factory networks, and bot amplifiers is available for <strong>academic research and non-commercial use</strong> upon request. 
+              </p>
+              <div style={{ fontSize: '0.8rem', color: '#71767b', marginBottom: '20px', padding: '10px', background: '#000', borderRadius: '8px', border: '1px solid #2f3336' }}>
+                🛡️ PROTECTING THE HUMAN WEB: Access is restricted to prevent adversarial use by automated slop networks.
+              </div>
+              
+              <button 
+                onClick={() => {
+                  const pass = prompt("Enter researcher password to unlock download:");
+                  if (pass === "zeroslop-research-2026") {
+                    // Logic to generate and download CSV
+                    const csvRows = [
+                      ["Type", "Handle", "Text", "AI Score", "Detected At"],
+                      ...allDocs.map(d => ["Tweet", d.fields.author_handle?.stringValue, d.fields.text?.stringValue?.replace(/,/g, ""), d.fields.ai_score?.doubleValue || 0, d.updateTime]),
+                      ...allAccounts.map(d => ["Factory", d.fields.handle?.stringValue, "N/A", 100, d.updateTime]),
+                      ...allSuspicious.map(d => ["Amplifier", d.fields.handle?.stringValue, "N/A", 50, d.updateTime])
+                    ];
+                    
+                    const csvContent = "data:text/csv;charset=utf-8," + csvRows.map(e => e.join(",")).join("\n");
+                    const encodedUri = encodeURI(csvContent);
+                    const link = document.createElement("a");
+                    link.setAttribute("href", encodedUri);
+                    link.setAttribute("download", "zeroslop_community_dataset.csv");
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  } else {
+                    alert("Incorrect password. Please contact @jrhwood for research access.");
+                  }
+                }}
+                style={{ 
+                  background: '#1d9bf0', 
+                  color: 'white', 
+                  border: 'none', 
+                  padding: '10px 20px', 
+                  borderRadius: '20px', 
+                  fontWeight: 'bold', 
+                  cursor: 'pointer',
+                  width: '100%'
+                }}
+              >
+                📥 Download Community Dataset (CSV)
+              </button>
+            </div>
           </Tweet>
         </section>
 
