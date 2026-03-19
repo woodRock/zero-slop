@@ -3,14 +3,7 @@ import React from 'react';
 export default function SlopMap({ targetHandle, amplifiers = [] }) {
   if (!targetHandle) return null;
 
-  // Mocking links for visualization if amplifiers aren't provided
-  // In a real scenario, these would come from the Firestore query
-  const displayAmplifiers = amplifiers.length > 0 ? amplifiers : [
-    { handle: "@bot_amplifier_1", type: "Retweeter", rep: 12 },
-    { handle: "@faceless_promo", type: "Quote Tweet", rep: 5 },
-    { handle: "@hustle_bot_99", type: "Amplifier", rep: 84 },
-    { handle: "@ai_guru_fan", type: "Bot Interaction", rep: 3 }
-  ];
+  const displayAmplifiers = amplifiers;
 
   const RISK_INDICATORS = [
     "Thread Hook Pattern Detected",
@@ -56,7 +49,7 @@ export default function SlopMap({ targetHandle, amplifiers = [] }) {
           </div>
 
           {/* Amplifier Nodes */}
-          {displayAmplifiers.map((amp, i) => {
+          {displayAmplifiers.length > 0 ? displayAmplifiers.map((amp, i) => {
             const angle = (i * (360 / displayAmplifiers.length)) * (Math.PI / 180);
             const radius = 100;
             const x = Math.cos(angle) * radius;
@@ -86,7 +79,11 @@ export default function SlopMap({ targetHandle, amplifiers = [] }) {
                 </div>
               </React.Fragment>
             );
-          })}
+          }) : (
+            <div style={{ position: 'absolute', top: '70%', color: '#71767b', fontSize: '0.8rem', textAlign: 'center' }}>
+              No coordinated bot amplification detected yet.<br/>Run an amplifier scan in the extension to find them.
+            </div>
+          )}
         </div>
 
         <div style={{ width: '200px', background: '#000', padding: '15px', borderRadius: '12px', border: '1px solid #2f3336' }}>

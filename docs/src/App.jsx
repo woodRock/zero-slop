@@ -23,8 +23,33 @@ function App() {
   const [allSuspicious, setAllSuspicious] = useState([]);
   const [trendStats, setTrendStats] = useState({});
   const [activeMapHandle, setActiveMapHandle] = useState(null);
+  const [activeMapAmplifiers, setActiveMapAmplifiers] = useState([]);
   
   const GOAL = 5000; // Community goal
+
+  const findAmplifiersForHandle = (handle) => {
+    // 1. Find all tweet IDs from this factory
+    const factoryTweets = allDocs
+      .filter(doc => doc.fields.author_handle?.stringValue === handle)
+      .map(doc => doc.fields.tweet_id?.stringValue);
+
+    // 2. Find all suspicious accounts that were caught on those tweets
+    const realAmplifiers = allSuspicious
+      .filter(susp => factoryTweets.includes(susp.fields.reason_tweet_id?.stringValue))
+      .map(susp => ({
+        handle: susp.fields.handle?.stringValue,
+        type: "Caught Amplifying",
+        rep: Math.floor(Math.random() * 40) // Mock rep for now, but real handle
+      }));
+
+    return realAmplifiers;
+  };
+
+  const handleMapOpen = (handle) => {
+    const realAmps = findAmplifiersForHandle(handle);
+    setActiveMapHandle(handle);
+    setActiveMapAmplifiers(realAmps);
+  };
 
   const getGlobalAudit = () => {
     // Combine all detection events for a master list
@@ -117,7 +142,8 @@ function App() {
     const searchVal = params.get('search');
     if (searchVal) {
       setSearchQuery('@' + searchVal);
-      setActiveMapHandle('@' + searchVal);
+      // Data is fetched in the useEffect below, so wait slightly
+      setTimeout(() => handleMapOpen('@' + searchVal), 2000);
     }
 
     const fetchRegistryData = async () => {
@@ -246,7 +272,6 @@ function App() {
     });
 
     setSearchResults(results);
-    if (results.length === 1) setActiveMapHandle(results[0].handle);
   };
 
   const getTrendsData = () => {
@@ -353,10 +378,10 @@ function App() {
         {/* Search & Map Feature */}
         {activeMapHandle && (
           <section id="network-map" style={{ animation: 'fadeIn 0.5s' }}>
-            <SlopMap targetHandle={activeMapHandle} />
+            <SlopMap targetHandle={activeMapHandle} amplifiers={activeMapAmplifiers} />
             <div style={{ textAlign: 'center', marginBottom: '20px' }}>
               <button 
-                onClick={() => setActiveMapHandle(null)}
+                onClick={() => { setActiveMapHandle(null); setActiveMapAmplifiers([]); }}
                 style={{ background: 'none', border: '1px solid #2f3336', color: '#71767b', padding: '5px 15px', borderRadius: '20px', cursor: 'pointer', fontSize: '0.8rem' }}
               >
                 Close Map
@@ -541,7 +566,7 @@ function App() {
           {searchResults.length > 0 && (
             <div className="search-results" style={{ background: 'var(--twitter-dark-gray)', padding: '10px', borderRadius: '12px', marginTop: '8px' }}>
               {searchResults.slice(0, 5).map((res, i) => (
-                <div key={i} style={{ marginBottom: '12px', fontSize: '0.85rem', cursor: 'pointer' }} onClick={() => setActiveMapHandle(res.handle)}>
+                <div key={i} style={{ marginBottom: '12px', fontSize: '0.85rem', cursor: 'pointer' }} onClick={() => handleMapOpen(res.handle)}>
                   <div style={{ fontWeight: 'bold', color: 'inherit' }}>{res.handle}</div>
                   <div style={{ color: '#f4212e' }}>{Math.round(res.score)}% AI Score ({res.count} detections)</div>
                   {res.label && <div style={{ fontSize: '0.7rem', background: '#f4212e', color: 'white', display: 'inline-block', padding: '1px 5px', borderRadius: '4px', marginTop: '3px' }}>{res.label}</div>}
