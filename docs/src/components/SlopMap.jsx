@@ -1,0 +1,111 @@
+import React from 'react';
+
+export default function SlopMap({ targetHandle, amplifiers = [] }) {
+  if (!targetHandle) return null;
+
+  // Mocking links for visualization if amplifiers aren't provided
+  // In a real scenario, these would come from the Firestore query
+  const displayAmplifiers = amplifiers.length > 0 ? amplifiers : [
+    { handle: "@bot_amplifier_1", type: "Retweeter", rep: 12 },
+    { handle: "@faceless_promo", type: "Quote Tweet", rep: 5 },
+    { handle: "@hustle_bot_99", type: "Amplifier", rep: 84 },
+    { handle: "@ai_guru_fan", type: "Bot Interaction", rep: 3 }
+  ];
+
+  const RISK_INDICATORS = [
+    "Thread Hook Pattern Detected",
+    "Manufactured Urgency: 'Save this'",
+    "Hustle Pitch: 'Passive Income'",
+    "Coordinated Instant Retweets"
+  ];
+
+  return (
+    <div className="slop-map-container" style={{ 
+      background: '#16181c', 
+      border: '1px solid #2f3336', 
+      borderRadius: '16px', 
+      padding: '20px',
+      margin: '20px 0',
+      color: '#e7e9ea',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
+      <div style={{ textAlign: 'center', marginBottom: '30px' }}>
+        <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#f4212e' }}>🕸️ Network Map: {targetHandle}</h3>
+        <p style={{ fontSize: '0.75rem', color: '#71767b' }}>Coordinated Industrial Amplification detected.</p>
+      </div>
+
+      <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+        <div style={{ flex: 1, position: 'relative', height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {/* The Central Factory Node */}
+          <div style={{ 
+            width: '80px', 
+            height: '80px', 
+            background: '#000', 
+            border: '4px solid #f4212e', 
+            borderRadius: '50%', 
+            display: 'flex', 
+            flexDirection: 'column',
+            alignItems: 'center', 
+            justifyContent: 'center',
+            zIndex: 10,
+            boxShadow: '0 0 20px rgba(244, 33, 46, 0.4)'
+          }}>
+            <div style={{ fontSize: '1.5rem' }}>🏭</div>
+            <div style={{ fontSize: '0.6rem', fontWeight: 'bold' }}>FACTORY</div>
+          </div>
+
+          {/* Amplifier Nodes */}
+          {displayAmplifiers.map((amp, i) => {
+            const angle = (i * (360 / displayAmplifiers.length)) * (Math.PI / 180);
+            const radius = 100;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius;
+
+            return (
+              <React.Fragment key={i}>
+                <svg style={{ position: 'absolute', width: '100%', height: '100%', pointerEvents: 'none' }}>
+                  <line x1="50%" y1="50%" x2={`calc(50% + ${x}px)`} y2={`calc(50% + ${y}px)`} stroke="#f4212e" strokeWidth="1" strokeDasharray="4" opacity="0.4" />
+                </svg>
+                <div style={{ 
+                  position: 'absolute',
+                  transform: `translate(${x}px, ${y}px)`,
+                  width: '45px',
+                  height: '45px',
+                  background: '#16181c',
+                  border: `2px solid ${amp.rep > 50 ? '#7856ff' : '#ffd700'}`,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 5
+                }} title={`Bounty Hunter Rep: ${amp.rep}`}>
+                  <div style={{ fontSize: '0.9rem' }}>{amp.rep > 50 ? '🛡️' : '🤖'}</div>
+                  <div style={{ fontSize: '0.4rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '40px' }}>{amp.handle}</div>
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        <div style={{ width: '200px', background: '#000', padding: '15px', borderRadius: '12px', border: '1px solid #2f3336' }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 'bold', color: '#f4212e', marginBottom: '10px', textTransform: 'uppercase' }}>High Risk Indicators:</div>
+          {RISK_INDICATORS.map((risk, i) => (
+            <div key={i} style={{ fontSize: '0.7rem', color: '#71767b', marginBottom: '6px', display: 'flex', gap: '5px' }}>
+              <span>🚩</span> {risk}
+            </div>
+          ))}
+          <div style={{ marginTop: '15px', paddingTop: '10px', borderTop: '1px solid #2f3336' }}>
+            <div style={{ fontSize: '0.65rem', color: '#7856ff', fontWeight: 'bold' }}>HUNTER REPUTATION SYSTEM</div>
+            <div style={{ fontSize: '0.6rem', color: '#71767b', marginTop: '2px' }}>Purple nodes represent verified high-rep bounty hunters.</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: '20px', padding: '10px', background: '#f4212e1a', borderRadius: '8px', border: '1px solid #f4212e4d', fontSize: '0.8rem', textAlign: 'center' }}>
+        <strong>Bounty Hunter Vision:</strong> This network map is generated by cross-referencing amplifier patterns with our global slop registry.
+      </div>
+    </div>
+  );
+}

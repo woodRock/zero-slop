@@ -62,14 +62,25 @@
     </div>
 
     <div class="toggle-container">
-      <span>Auto-Hide Slop</span>
+      <span>Bounty Hunter Vision</span>
       <label class="switch">
-        <input type="checkbox" id="autoHideToggle">
+        <input type="checkbox" id="hunterVisionToggle">
         <span class="slider"></span>
       </label>
     </div>
+    <div style="font-size: 0.75rem; color: #666; margin-bottom: 15px; margin-top: -10px;">
+      Heuristic highlighting of extraction hooks (Free).
+    </div>
+
+    <label for="slopAction">Slop Action (Threshold Met):</label>
+    <select id="slopAction" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 10px; font-size: 0.9rem;">
+      <option value="none">Show Badge Only</option>
+      <option value="blur" selected>Blur Content (Default)</option>
+      <option value="zap">Zap (Remove from Timeline)</option>
+    </select>
+
     <div style="margin-bottom: 15px; font-size: 0.85rem; color: #555;">
-      Hide threshold: <span id="thresholdVal">85</span>%
+      Action threshold: <span id="thresholdVal">85</span>%
       <input type="range" id="thresholdSlider" min="0" max="100" value="85" style="width: 100%; margin-top: 5px;">
     </div>
 

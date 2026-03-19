@@ -5,7 +5,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const updateBtn = document.getElementById('updateBtn');
   const updateStatus = document.getElementById('updateStatus');
   const autoScanToggle = document.getElementById('autoScanToggle');
-  const autoHideToggle = document.getElementById('autoHideToggle');
+  const hunterVisionToggle = document.getElementById('hunterVisionToggle');
+  const slopAction = document.getElementById('slopAction');
   const thresholdSlider = document.getElementById('thresholdSlider');
   const thresholdVal = document.getElementById('thresholdVal');
   const exportBtn = document.getElementById('exportBtn');
@@ -27,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load state
-  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'autoHide', 'hideThreshold', 'scanHistory', 'slopsCaught'], (result) => {
+  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'slopAction', 'hideThreshold', 'scanHistory', 'slopsCaught', 'hunterVision'], (result) => {
     if (result.zerogptApiKey) {
       apiKeyInput.value = result.zerogptApiKey;
       statusEl.textContent = 'API Key is already set.';
@@ -36,8 +37,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (result.autoScan) {
       autoScanToggle.checked = true;
     }
-    if (result.autoHide) {
-      autoHideToggle.checked = true;
+    if (result.hunterVision) {
+      hunterVisionToggle.checked = true;
+    }
+    if (result.slopAction) {
+      slopAction.value = result.slopAction;
     }
     if (result.hideThreshold !== undefined) {
       thresholdSlider.value = result.hideThreshold;
@@ -69,9 +73,14 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.set({ autoScan: e.target.checked });
   });
 
-  // Toggle auto-hide
-  autoHideToggle.addEventListener('change', (e) => {
-    chrome.storage.local.set({ autoHide: e.target.checked });
+  // Toggle hunter vision
+  hunterVisionToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ hunterVision: e.target.checked });
+  });
+
+  // Update slop action
+  slopAction.addEventListener('change', (e) => {
+    chrome.storage.local.set({ slopAction: e.target.value });
   });
 
   // Update threshold

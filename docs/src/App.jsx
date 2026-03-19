@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 import FieldGuide from './components/FieldGuide'
+import SlopCycle from './components/SlopCycle'
+import SlopMap from './components/SlopMap'
 
 function App() {
   const year = new Date().getFullYear();
@@ -18,6 +20,7 @@ function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [allDocs, setAllDocs] = useState([]);
   const [trendStats, setTrendStats] = useState({});
+  const [activeMapHandle, setActiveMapHandle] = useState(null);
   
   const GOAL = 5000; // Community goal
 
@@ -98,6 +101,14 @@ function App() {
   const weeklyAudit = getGlobalAudit();
 
   useEffect(() => {
+    // Check if deep linked from extension
+    const params = new URLSearchParams(window.location.search);
+    const searchVal = params.get('search');
+    if (searchVal) {
+      setSearchQuery('@' + searchVal);
+      setActiveMapHandle('@' + searchVal);
+    }
+
     const fetchRegistryData = async () => {
       try {
         const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
@@ -167,13 +178,14 @@ function App() {
     setSearchQuery(query);
     if (!query) {
       setSearchResults([]);
+      setActiveMapHandle(null);
       return;
     }
     
     const handleMap = {};
     allDocs.forEach(doc => {
       const handle = doc.fields.author_handle?.stringValue;
-      if (handle && handle.toLowerCase().includes(query)) {
+      if (handle && handle.toLowerCase().includes(query.replace('@', ''))) {
         if (!handleMap[handle]) {
           handleMap[handle] = { handle, scores: [], count: 0 };
         }
@@ -197,6 +209,7 @@ function App() {
     });
 
     setSearchResults(results);
+    if (results.length === 1) setActiveMapHandle(results[0].handle);
   };
 
   const getTrendsData = () => {
@@ -276,6 +289,7 @@ function App() {
         </div>
         <nav>
           <a href="#" className="nav-item active"><span className="nav-text">Home</span></a>
+          <a href="#factory" className="nav-item"><span className="nav-text">Inside the Factory</span></a>
           <a href="#wall-of-shame" className="nav-item"><span className="nav-text">Live Detections</span></a>
           <a href="#installation" className="nav-item"><span className="nav-text">Install</span></a>
           <a href="#taxonomy" className="nav-item"><span className="nav-text">Taxonomy of Slop</span></a>
@@ -293,6 +307,21 @@ function App() {
           <h2>Home</h2>
         </header>
 
+        {/* Search & Map Feature */}
+        {activeMapHandle && (
+          <section id="network-map" style={{ animation: 'fadeIn 0.5s' }}>
+            <SlopMap targetHandle={activeMapHandle} />
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <button 
+                onClick={() => setActiveMapHandle(null)}
+                style={{ background: 'none', border: '1px solid #2f3336', color: '#71767b', padding: '5px 15px', borderRadius: '20px', cursor: 'pointer', fontSize: '0.8rem' }}
+              >
+                Close Map
+              </button>
+            </div>
+          </section>
+        )}
+
         {/* 1. HERO */}
         <Tweet media={{ type: 'image', src: `${baseUrl}banner.jpg` }}>
           <h2>Welcome to ZeroSlop</h2>
@@ -308,6 +337,11 @@ function App() {
             </div>
           </div>
         </Tweet>
+
+        {/* 1.5 MECHANISM */}
+        <section id="factory">
+          <SlopCycle />
+        </section>
 
         {/* 2. EVIDENCE (Audit + Wall of Shame) */}
         {weeklyAudit && (
@@ -464,15 +498,8 @@ function App() {
           {searchResults.length > 0 && (
             <div className="search-results" style={{ background: 'var(--twitter-dark-gray)', padding: '10px', borderRadius: '12px', marginTop: '8px' }}>
               {searchResults.slice(0, 5).map((res, i) => (
-                <div key={i} style={{ marginBottom: '12px', fontSize: '0.85rem' }}>
-                  <a 
-                    href={`https://x.com/${res.handle.replace('@', '')}`} 
-                    target="_blank" 
-                    rel="noopener noreferrer" 
-                    style={{ fontWeight: 'bold', color: 'inherit', textDecoration: 'none' }}
-                  >
-                    {res.handle}
-                  </a>
+                <div key={i} style={{ marginBottom: '12px', fontSize: '0.85rem', cursor: 'pointer' }} onClick={() => setActiveMapHandle(res.handle)}>
+                  <div style={{ fontWeight: 'bold', color: 'inherit' }}>{res.handle}</div>
                   <div style={{ color: '#f4212e' }}>{Math.round(res.score)}% AI Score ({res.count} detections)</div>
                   {res.label && <div style={{ fontSize: '0.7rem', background: '#f4212e', color: 'white', display: 'inline-block', padding: '1px 5px', borderRadius: '4px', marginTop: '3px' }}>{res.label}</div>}
                 </div>

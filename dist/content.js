@@ -91,11 +91,12 @@ function injectSlopFactoryBanner(handle) {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 15px;
     border-bottom: 2px solid #f4212e;
   `;
   banner.innerHTML = `
-    <span>🚩 MANUALLY IDENTIFIED SLOP FACTORY: ${handle}</span>
+    <span>🚩 RED SHIELD: SLOP FACTORY DETECTED (${handle})</span>
+    <a href="https://woodrock.github.io/zero-slop?search=${handle.replace('@', '')}" target="_blank" style="color: #1d9bf0; text-decoration: underline; font-size: 12px;">View Network Map</a>
     <button id="close-slopfactory-banner" style="background: #f4212e; border: none; color: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Dismiss</button>
   `;
 
@@ -124,36 +125,27 @@ function injectSlopFactoryBadge(container, handle) {
     height: 16px;
     cursor: help;
   `;
-  badge.innerText = '🚩 RED SHIELD: FACTORY';
-  badge.title = 'This account has been manually identified as a Slop Factory by the community.';
+  badge.innerHTML = `🚩 RED SHIELD: FACTORY <span class="v-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
+  badge.title = 'Confirmed Slop Factory. Community verification in progress.';
+
+  badge.querySelector('.v-up').onclick = (e) => {
+    e.stopPropagation();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
+    badge.querySelector('.v-up').innerText = '✅';
+  };
+  badge.querySelector('.v-down').onclick = (e) => {
+    e.stopPropagation();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
+    badge.querySelector('.v-down').innerText = '❌';
+  };
 
   const timeElement = container.querySelector('time');
   if (timeElement && timeElement.parentNode) {
     timeElement.parentNode.appendChild(badge);
   }
 
-  // Handle Auto-Hide for Slop Factories
-  chrome.storage.local.get(['autoHide'], (result) => {
-    const autoHide = result.autoHide || false;
-    if (autoHide) {
-      const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
-      if (contentDiv) {
-        contentDiv.style.filter = 'blur(10px)'; // Slightly more blur for manual factories
-        contentDiv.style.opacity = '0.5';
-        contentDiv.style.transition = 'all 0.3s ease';
-        contentDiv.style.cursor = 'pointer';
-        contentDiv.title = 'Click to reveal confirmed Slop Factory content';
-
-        contentDiv.addEventListener('click', function reveal() {
-          contentDiv.style.filter = 'none';
-          contentDiv.style.opacity = '1';
-          contentDiv.style.cursor = 'default';
-          contentDiv.title = '';
-          contentDiv.removeEventListener('click', reveal);
-        });
-      }
-    }
-  });
+  // Handle Auto-Action for Slop Factories
+  handleAutoAction(container, 100);
 }
 
 function injectSuspiciousBanner(handle, reasonTweetId) {
@@ -469,30 +461,8 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
     timeElement.parentNode.appendChild(badge);
   }
 
-  // Handle Auto-Hide
-  chrome.storage.local.get(['autoHide', 'hideThreshold'], (result) => {
-    const autoHide = result.autoHide || false;
-    const hideThreshold = result.hideThreshold !== undefined ? result.hideThreshold : 85;
-    
-    if (autoHide && percentage >= hideThreshold) {
-      const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
-      if (contentDiv) {
-        contentDiv.style.filter = 'blur(8px)';
-        contentDiv.style.opacity = '0.6';
-        contentDiv.style.transition = 'all 0.3s ease';
-        contentDiv.style.cursor = 'pointer';
-        contentDiv.title = 'Click to reveal AI Slop';
-        
-        contentDiv.addEventListener('click', function reveal() {
-          contentDiv.style.filter = 'none';
-          contentDiv.style.opacity = '1';
-          contentDiv.style.cursor = 'default';
-          contentDiv.title = '';
-          contentDiv.removeEventListener('click', reveal);
-        });
-      }
-    }
-  });
+  // Handle Auto-Action (Blur/Zap)
+  handleAutoAction(container, percentage);
 }
 
 function initObservers() {
@@ -534,6 +504,10 @@ function initObservers() {
         const container = entry.target;
         if (!container.dataset.zerogptChecked) {
           container.dataset.zerogptChecked = "true";
+          
+          // Apply Bounty Hunter Vision (Free Heuristic Highlighting)
+          highlightSlopMarkers(container);
+
           const info = extractTweetInfo(container);
           if (info.tweetId && !info.tweetId.startsWith('local-')) {
             chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
@@ -731,6 +705,70 @@ const SLOP_TYPES = [
   { id: 'type5', name: 'Type 5: Personal Transformation', emoji: '🦋' },
 ];
 
+const HUNTER_HEURISTICS = [
+  { regex: /(thread|🧵|1\/\d+)/gi, label: "Thread Hook" },
+  { regex: /(save this|bookmark|don't miss)/gi, label: "Engagement Bait" },
+  { regex: /(passive income|faceless|blueprint|money machine)/gi, label: "Hustle Pitch" },
+  { regex: /(replies in \d+ days|my cousin|my friend)/gi, label: "Fake Social Proof" },
+  { regex: /(game changer|changing everything|ai prompts)/gi, label: "AI Over-Hype" }
+];
+
+function highlightSlopMarkers(element) {
+  if (!element) return;
+  const tweetTextDiv = element.querySelector('[data-testid="tweetText"]');
+  if (!tweetTextDiv || tweetTextDiv.dataset.hunterVision) return;
+
+  chrome.storage.local.get(['hunterVision'], (result) => {
+    if (!result.hunterVision) return;
+
+    let html = tweetTextDiv.innerHTML;
+    let found = false;
+
+    HUNTER_HEURISTICS.forEach(h => {
+      if (h.regex.test(tweetTextDiv.innerText)) {
+        html = html.replace(h.regex, (match) => {
+          found = true;
+          return `<span style="background: rgba(244, 33, 46, 0.2); border-bottom: 2px solid #f4212e; color: #f4212e; font-weight: bold;" title="Bounty Hunter Detection: ${h.label}">${match}</span>`;
+        });
+      }
+    });
+
+    if (found) {
+      tweetTextDiv.innerHTML = html;
+      tweetTextDiv.dataset.hunterVision = "true";
+    }
+  });
+}
+
+function handleAutoAction(container, percentage) {
+  chrome.storage.local.get(['slopAction', 'hideThreshold'], (result) => {
+    const action = result.slopAction || 'blur';
+    const threshold = result.hideThreshold !== undefined ? result.hideThreshold : 85;
+    
+    if (percentage >= threshold) {
+      const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
+      if (!contentDiv) return;
+
+      if (action === 'zap') {
+        container.style.display = 'none'; // Physical removal from timeline
+      } else if (action === 'blur') {
+        contentDiv.style.filter = 'blur(8px)';
+        contentDiv.style.opacity = '0.6';
+        contentDiv.style.transition = 'all 0.3s ease';
+        contentDiv.style.cursor = 'pointer';
+        contentDiv.title = 'Click to reveal AI Slop';
+        
+        contentDiv.addEventListener('click', function reveal() {
+          contentDiv.style.filter = 'none';
+          contentDiv.style.opacity = '1';
+          contentDiv.style.cursor = 'default';
+          contentDiv.title = '';
+          contentDiv.removeEventListener('click', reveal);
+        });
+      }
+    }
+  });
+}
 function showOverlay(message, type = "info", currentAiScore = 0) {
   const existing = document.getElementById('zerogpt-overlay');
   if (existing) existing.remove();

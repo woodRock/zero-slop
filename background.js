@@ -150,6 +150,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
   } else if (request.action === "voteSlop") {
     voteSlopTweet(request.tweetId, request.voteType);
+  } else if (request.action === "voteAccount") {
+    voteSlopAccount(request.handle, request.voteType);
   } else if (request.action === "checkRegistry") {
     checkRegistry(request.tweetId).then(data => {
       if (data) {
@@ -549,6 +551,36 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     });
   } catch (e) {
     console.error("ZeroSlop: Firestore error:", e);
+  }
+}
+
+async function voteSlopAccount(handle, voteType) {
+  const accountId = handle.replace('@', '').toLowerCase();
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+  
+  try {
+    const getResponse = await fetch(url);
+    if (!getResponse.ok) return;
+    const doc = await getResponse.json();
+    
+    const fields = {};
+    if (voteType === 'up') {
+      const currentUp = doc.fields.upvotes?.integerValue || 0;
+      fields.upvotes = { integerValue: parseInt(currentUp) + 1 };
+    } else {
+      const currentDown = doc.fields.downvotes?.integerValue || 0;
+      fields.downvotes = { integerValue: parseInt(currentDown) + 1 };
+    }
+    
+    let maskParams = `&updateMask.fieldPaths=${voteType === 'up' ? 'upvotes' : 'downvotes'}`;
+    
+    await fetch(url + maskParams, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fields })
+    });
+  } catch (e) {
+    console.error("ZeroSlop: Error voting for account", e);
   }
 }
 
