@@ -1,12 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function FeedAuditor({ database = [] }) {
   const [input, setInput] = useState('');
   const [results, setResult] = useState(null);
 
-  const runAudit = () => {
-    // Extract handles (support with or without @, separated by spaces, commas or newlines)
-    const handles = input.split(/[\s,]+/)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const auditList = params.get('audit');
+    if (auditList && database.length > 0) {
+      const decoded = auditList.split(',').join('\n');
+      setInput(decoded);
+      // Give the DB a moment to settle then run
+      setTimeout(() => runAuditFromText(decoded), 500);
+    }
+  }, [database]);
+
+  const runAuditFromText = (text) => {
+    const handles = text.split(/[\s,]+/)
       .map(h => h.trim().toLowerCase().replace('@', ''))
       .filter(h => h.length > 0);
 
@@ -41,6 +51,8 @@ export default function FeedAuditor({ database = [] }) {
       slopScore: Math.round(((redShields.length + (blueShields.length * 0.5)) / handles.length) * 100)
     });
   };
+
+  const runAudit = () => runAuditFromText(input);
 
   return (
     <div className="feed-auditor" style={{ 

@@ -473,9 +473,6 @@ function extractTweetInfo(element) {
   return { text, tweetId: null, author: null };
 }
 
-/**
- * Finds all visible tweets by the same author and combines their text
- */
 function extractThreadInfo(element) {
   const currentTweetInfo = extractTweetInfo(element);
   if (!currentTweetInfo.author?.handle) return currentTweetInfo;
@@ -507,14 +504,10 @@ function extractThreadInfo(element) {
   };
 }
 
-/**
- * Specifically finds all visible tweets on a profile page or by an author
- */
 function extractProfileInfo(element) {
   const currentTweetInfo = extractTweetInfo(element);
   let targetHandle = currentTweetInfo.author?.handle;
 
-  // If we are on a profile page but didn't click a tweet, try to get handle from URL
   if (!targetHandle) {
     const pathParts = window.location.pathname.split('/');
     if (pathParts.length >= 2 && !['home', 'explore', 'notifications', 'messages', 'search', 'settings'].includes(pathParts[1])) {
@@ -567,8 +560,6 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
 
   if (!container || container.querySelector('.zerogpt-badge')) return;
 
-  // Task 6: Registry Auto-Cleanup
-  // Ignore or hide badges where downvotes > upvotes + 2
   if (downvotes > upvotes + 2) {
     return;
   }
@@ -623,39 +614,39 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
     timeElement.parentNode.appendChild(badge);
   }
 
-  // Handle Auto-Action (Blur/Zap)
   handleAutoAction(container, percentage);
 }
 
 function initObservers() {
   if (window.zerogptObserver) window.zerogptObserver.disconnect();
 
-  // Profile Warning Detection
-  const checkProfileWarning = () => {
+  const checkContext = () => {
     const path = window.location.pathname;
     const parts = path.split('/').filter(Boolean);
+    
     if (parts.length === 1 && !['home', 'explore', 'notifications', 'messages', 'search', 'settings'].includes(parts[0])) {
       const handle = '@' + parts[0];
       chrome.runtime.sendMessage({ action: "checkProfileSlop", handle: handle });
       chrome.runtime.sendMessage({ action: "checkSuspicious", handle: handle });
       chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: handle });
     }
+
+    if (path.includes('/following') || path.includes('/followers') || path.includes('/verified_followers')) {
+      injectListAuditorButton();
+    }
   };
   
-  // Initial check
-  checkProfileWarning();
+  checkContext();
   
-  // Re-check on navigation (Twitter is a SPA)
   let lastPath = window.location.pathname;
   const navObserver = new MutationObserver(() => {
     if (window.location.pathname !== lastPath) {
       lastPath = window.location.pathname;
-      checkProfileWarning();
-      // Remove any existing banners on new page
-      const profileBanner = document.getElementById('zerogpt-profile-banner');
-      if (profileBanner) profileBanner.remove();
-      const suspiciousBanner = document.getElementById('zerogpt-suspicious-banner');
-      if (suspiciousBanner) suspiciousBanner.remove();
+      checkContext();
+      ['zerogpt-profile-banner', 'zerogpt-suspicious-banner', 'zerogpt-list-auditor'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+      });
     }
   });
   navObserver.observe(document.head, { childList: true, subtree: true });
@@ -664,43 +655,61 @@ function initObservers() {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         const container = entry.target;
-        if (!container.dataset.zerogptChecked) {
+        
+        if (container.tagName === 'ARTICLE' && !container.dataset.zerogptChecked) {
           container.dataset.zerogptChecked = "true";
-          
-          // Apply Bounty Hunter Vision (Free Heuristic Highlighting)
           highlightSlopMarkers(container);
-
           const info = extractTweetInfo(container);
           if (info.tweetId && !info.tweetId.startsWith('local-')) {
             chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
             chrome.storage.local.get(['autoScan'], (result) => {
-              if (result.autoScan) {
-                chrome.runtime.sendMessage({ action: "autoScanTweet", ...info });
-              }
+              if (result.autoScan) chrome.runtime.sendMessage({ action: "autoScanTweet", ...info });
             });
-            
-            // Check if author is suspicious or slop factory
             if (info.author?.handle) {
               chrome.runtime.sendMessage({ action: "checkSuspicious", handle: info.author.handle });
               chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: info.author.handle });
             }
           }
         }
+
+        if (container.getAttribute('data-testid') === 'UserCell' && !container.dataset.zerogptChecked) {
+          container.dataset.zerogptChecked = "true";
+          const handleEl = container.querySelector('span:nth-child(2)');
+          if (handleEl && handleEl.innerText.startsWith('@')) {
+            const handle = handleEl.innerText;
+            chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: handle });
+            chrome.runtime.sendMessage({ action: "checkSuspicious", handle: handle });
+          }
+        }
       }
     });
   }, { threshold: 0.1 });
 
-  // Special Observer for Retweets/Quotes Modal
+  const mutationObserver = new MutationObserver((mutations) => {
+    mutations.forEach(mutation => {
+      mutation.addedNodes.forEach(node => {
+        if (node.nodeType === 1) {
+          if (node.tagName === 'ARTICLE' || node.getAttribute('data-testid') === 'UserCell') {
+            window.zerogptObserver.observe(node);
+          } else {
+            const newTargets = node.querySelectorAll('article, [data-testid="UserCell"]');
+            newTargets.forEach(t => window.zerogptObserver.observe(t));
+          }
+        }
+      });
+    });
+  });
+
+  mutationObserver.observe(document.body, { childList: true, subtree: true });
+
   const retweetObserver = new MutationObserver((mutations) => {
     const path = window.location.pathname;
     if (path.includes('/retweets') || path.includes('/quotes')) {
       const match = path.match(/\/status\/(\d+)/);
       if (match) {
         const tweetId = match[1];
-        // Find the author handle of the parent tweet from the background registry or current page
         chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: tweetId }, (data) => {
           const factoryHandle = data?.author_handle;
-          
           if (data && data.ai_score > 15) {
             const userCells = document.querySelectorAll('[data-testid="UserCell"]');
             userCells.forEach(cell => {
@@ -724,48 +733,59 @@ function initObservers() {
       }
     }
   });
-
-  const articles = document.querySelectorAll('article');
-  articles.forEach(el => window.zerogptObserver.observe(el));
-
-  const mutationObserver = new MutationObserver((mutations) => {
-    mutations.forEach(mutation => {
-      mutation.addedNodes.forEach(node => {
-        if (node.nodeType === 1) {
-          if (node.tagName === 'ARTICLE') {
-            window.zerogptObserver.observe(node);
-          } else {
-            const newArticles = node.querySelectorAll('article');
-            newArticles.forEach(article => window.zerogptObserver.observe(article));
-          }
-        }
-      });
-    });
-  });
-
-  mutationObserver.observe(document.body, { childList: true, subtree: true });
   retweetObserver.observe(document.body, { childList: true, subtree: true });
+
+  const articles = document.querySelectorAll('article, [data-testid="UserCell"]');
+  articles.forEach(el => window.zerogptObserver.observe(el));
+}
+
+function injectListAuditorButton() {
+  if (document.getElementById('zerogpt-list-auditor')) return;
+  const header = document.querySelector('[data-testid="primaryColumn"]');
+  if (!header) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'zerogpt-list-auditor';
+  btn.innerText = '🕵️ Run Bounty Hunter Audit on this List';
+  btn.style.cssText = `
+    width: 100%;
+    background: #1d9bf0;
+    color: white;
+    border: none;
+    padding: 12px;
+    font-weight: bold;
+    cursor: pointer;
+    border-bottom: 1px solid #2f3336;
+    font-size: 14px;
+    z-index: 10;
+  `;
+
+  btn.onclick = () => {
+    const handles = Array.from(document.querySelectorAll('[data-testid="UserCell"] span:nth-child(2)'))
+      .map(el => el.innerText)
+      .filter(h => h.startsWith('@'));
+    if (handles.length === 0) {
+      alert("No handles detected yet. Scroll down to load more!");
+      return;
+    }
+    const handleList = handles.join(',');
+    window.open(`https://woodrock.github.io/zero-slop?audit=${handleList}`, '_blank');
+  };
+  header.prepend(btn);
 }
 
 function autoScanAmplifiers() {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('zerogpt_scan') === 'true') {
-    console.log("ZeroSlop: Auto-scanning amplifiers...");
-    
-    // Wait for content to load, then scrape and close
     let scanCount = 0;
     const scanInterval = setInterval(() => {
       const userCells = document.querySelectorAll('[data-testid="UserCell"]');
       if (userCells.length > 0 || scanCount > 10) {
         clearInterval(scanInterval);
-        
         const match = window.location.pathname.match(/\/status\/(\d+)/);
         const tweetId = match ? match[1] : null;
-
-        // Try to find the author handle from the registry before reporting bots
         chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: tweetId }, (regData) => {
           const factoryHandle = regData?.author_handle;
-
           userCells.forEach(cell => {
             const handleEl = cell.querySelector('span:nth-child(2)');
             if (handleEl && handleEl.innerText.startsWith('@')) {
@@ -783,19 +803,12 @@ function autoScanAmplifiers() {
             }
           });
         });
-        
-        console.log(`ZeroSlop: Scanned ${userCells.length} amplifiers. Closing tab.`);
-        setTimeout(() => {
-          chrome.runtime.sendMessage({ action: "closeScanTab" });
-        }, 1000);
+        setTimeout(() => { chrome.runtime.sendMessage({ action: "closeScanTab" }); }, 1000);
       }
       scanCount++;
     }, 1000);
   }
 }
-
-initObservers();
-autoScanAmplifiers();
 
 async function generateWantedPoster(author, percentage) {
   if (!author) return;
@@ -803,31 +816,23 @@ async function generateWantedPoster(author, percentage) {
   const ctx = canvas.getContext('2d');
   canvas.width = 600;
   canvas.height = 800;
-
   ctx.fillStyle = '#f4e4bc';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  
   ctx.strokeStyle = '#5d4037';
   ctx.lineWidth = 20;
   ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
-
   ctx.fillStyle = '#5d4037';
   ctx.font = 'bold 80px "Courier New", Courier, monospace';
   ctx.textAlign = 'center';
   ctx.fillText('WANTED', canvas.width / 2, 120);
-  
   ctx.font = 'bold 30px "Courier New", Courier, monospace';
   ctx.fillText('FOR SPREADING AI SLOP', canvas.width / 2, 160);
-
   if (author.pfp) {
     try {
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.src = author.pfp;
-      await new Promise((resolve) => {
-        img.onload = resolve;
-        img.onerror = resolve;
-      });
+      await new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; });
       ctx.fillStyle = '#d7ccc8';
       ctx.fillRect(150, 200, 300, 300);
       ctx.drawImage(img, 150, 200, 300, 300);
@@ -836,13 +841,11 @@ async function generateWantedPoster(author, percentage) {
       ctx.strokeRect(150, 200, 300, 300);
     } catch (e) {}
   }
-
   ctx.fillStyle = '#5d4037';
   ctx.font = 'bold 40px "Courier New", Courier, monospace';
   ctx.fillText(author.name || 'Unknown Slop-Poster', canvas.width / 2, 560);
   ctx.font = 'italic 30px "Courier New", Courier, monospace';
   ctx.fillText(author.handle || '@anonymous', canvas.width / 2, 610);
-
   ctx.save();
   ctx.translate(canvas.width / 2, 400);
   ctx.rotate(-0.3);
@@ -855,16 +858,12 @@ async function generateWantedPoster(author, percentage) {
   ctx.font = 'bold 30px Arial';
   ctx.fillText(`DETECTED: ${percentage}%`, 0, 45);
   ctx.restore();
-
   ctx.fillStyle = '#5d4037';
   ctx.font = 'bold 20px Arial';
   ctx.fillText('stamped by github.com/woodrock/zero-slop', canvas.width / 2, 750);
-
   return canvas.toBlob((blob) => {
     const item = new ClipboardItem({ "image/png": blob });
-    navigator.clipboard.write([item]).then(() => {
-      alert("Wanted Poster copied to clipboard! Share the truth. 🛡️");
-    });
+    navigator.clipboard.write([item]).then(() => { alert("Wanted Poster copied to clipboard! Share the truth. 🛡️"); });
   });
 }
 
@@ -900,46 +899,33 @@ function highlightSlopMarkers(element) {
   if (!element) return;
   const tweetTextDiv = element.querySelector('[data-testid="tweetText"]');
   if (!tweetTextDiv || tweetTextDiv.dataset.hunterVision) return;
-
   chrome.storage.local.get(['hunterVision'], (result) => {
     if (!result.hunterVision) return;
-
     let html = tweetTextDiv.innerHTML;
     let text = tweetTextDiv.innerText;
     let found = false;
     let score = 0;
-    
-    // Check UTC Window (00-07 UTC is high risk)
     const hour = new Date().getUTCHours();
     if (hour >= 0 && hour <= 7) score += 0.5;
-
-    // 1. Hard Blocks (Precision 1.00)
     SLOP_HEURISTICS.hardBlocks.forEach(h => {
       if (h.regex.test(text)) {
         html = html.replace(h.regex, (match) => {
-          found = true;
-          score += 5; // Automatic flag
+          found = true; score += 5;
           return `<span style="background: rgba(244, 33, 46, 0.25); border-bottom: 2px solid #f4212e; color: #f4212e; font-weight: bold;" title="HARD BLOCK: ${h.label}">${match}</span>`;
         });
       }
     });
-
-    // 2. Soft Signals (Weighted)
     SLOP_HEURISTICS.softSignals.forEach(s => {
       if (s.regex.test(text)) {
         html = html.replace(s.regex, (match) => {
-          found = true;
-          score += s.points;
+          found = true; score += s.points;
           return `<span style="background: rgba(255, 215, 0, 0.15); border-bottom: 2px dashed #ffd700; color: #ffd700;" title="SOFT SIGNAL: ${s.label} (+${s.points} pts)">${match}</span>`;
         });
       }
     });
-
     if (found) {
       tweetTextDiv.innerHTML = html;
       tweetTextDiv.dataset.hunterVision = "true";
-      
-      // If score is high (> 3), add a small diagnostic indicator
       if (score >= 3) {
         const diagnostic = document.createElement('div');
         diagnostic.innerText = `🚩 Heuristic Slop Score: ${score.toFixed(1)}`;
@@ -954,20 +940,16 @@ function handleAutoAction(container, percentage) {
   chrome.storage.local.get(['slopAction', 'hideThreshold'], (result) => {
     const action = result.slopAction || 'blur';
     const threshold = result.hideThreshold !== undefined ? result.hideThreshold : 85;
-    
     if (percentage >= threshold) {
       const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
       if (!contentDiv) return;
-
-      if (action === 'zap') {
-        container.style.display = 'none'; // Physical removal from timeline
-      } else if (action === 'blur') {
+      if (action === 'zap') { container.style.display = 'none'; } 
+      else if (action === 'blur') {
         contentDiv.style.filter = 'blur(8px)';
         contentDiv.style.opacity = '0.6';
         contentDiv.style.transition = 'all 0.3s ease';
         contentDiv.style.cursor = 'pointer';
         contentDiv.title = 'Click to reveal AI Slop';
-        
         contentDiv.addEventListener('click', function reveal() {
           contentDiv.style.filter = 'none';
           contentDiv.style.opacity = '1';
@@ -979,13 +961,12 @@ function handleAutoAction(container, percentage) {
     }
   });
 }
+
 function showOverlay(message, type = "info", currentAiScore = 0) {
   const existing = document.getElementById('zerogpt-overlay');
   if (existing) existing.remove();
-
   const overlay = document.createElement('div');
   overlay.id = 'zerogpt-overlay';
-  
   overlay.style.cssText = `
     position: fixed;
     top: 60px;
@@ -1003,35 +984,28 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
     animation: zerogptSlideIn 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
     display: block !important;
   `;
-
   const title = document.createElement('div');
   title.innerText = type === 'error' ? "ZeroGPT Error" : type === 'success' ? "Detection Result" : "Processing...";
   title.style.fontWeight = '800';
   title.style.marginBottom = '12px';
   title.style.fontSize = '1.2rem';
   title.style.color = '#000';
-
   const content = document.createElement('div');
   content.innerText = message;
   content.style.whiteSpace = 'pre-wrap';
   content.style.fontSize = '1rem';
   content.style.lineHeight = '1.4';
   content.style.color = '#333';
-
   overlay.appendChild(title);
   overlay.appendChild(content);
-
   if (type === 'success') {
     const btnContainer = document.createElement('div');
     btnContainer.style.display = 'flex';
     btnContainer.style.flexDirection = 'column';
     btnContainer.style.gap = '8px';
     btnContainer.style.marginTop = '15px';
-
     const info = currentOverlayInfo || extractTweetInfo(lastRightClickedElement);
-
     if (!message.includes('Reported')) {
-      // Heuristic Pre-Categorization
       let suggestedType = "";
       if (info?.text) {
         const text = info.text.toLowerCase();
@@ -1039,31 +1013,11 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
         else if (text.includes('passive income') || text.includes('faceless')) suggestedType = "type2";
         else if (text.includes('my cousin') || text.includes('replies in')) suggestedType = "type3";
       }
-
       const reportBtn = document.createElement('button');
       reportBtn.innerText = '🚩 Report as AI Slop';
-      reportBtn.style.cssText = `
-        background: #f4212e;
-        color: white;
-        border: none;
-        padding: 12px;
-        border-radius: 20px;
-        cursor: pointer;
-        font-weight: bold;
-        width: 100%;
-        font-size: 0.95rem;
-      `;
-
+      reportBtn.style.cssText = `background: #f4212e; color: white; border: none; padding: 12px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.95rem;`;
       const detailsDrawer = document.createElement('div');
-      detailsDrawer.style.cssText = `
-        display: none;
-        background: #f7f9f9;
-        border-radius: 12px;
-        padding: 12px;
-        border: 1px solid #e1e8ed;
-        margin-top: 5px;
-      `;
-
+      detailsDrawer.style.cssText = `display: none; background: #f7f9f9; border-radius: 12px; padding: 12px; border: 1px solid #e1e8ed; margin-top: 5px;`;
       const toggleDetails = document.createElement('div');
       toggleDetails.innerText = "Add Details (Optional) ▾";
       toggleDetails.style.cssText = "font-size: 0.75rem; color: #536471; cursor: pointer; text-align: center; margin-top: 4px; text-decoration: underline;";
@@ -1071,68 +1025,54 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
         detailsDrawer.style.display = detailsDrawer.style.display === 'none' ? 'block' : 'none';
         toggleDetails.innerText = detailsDrawer.style.display === 'none' ? "Add Details (Optional) ▾" : "Hide Details ▴";
       };
-
-      // Populate Details
       const slopSelect = document.createElement('select');
       slopSelect.style.cssText = "width: 100%; padding: 5px; border-radius: 6px; border: 1px solid #cfd9de; font-size: 0.8rem; margin-bottom: 10px;";
       const defaultOpt = document.createElement('option');
-      defaultOpt.value = "";
-      defaultOpt.text = "General Slop";
+      defaultOpt.value = ""; defaultOpt.text = "General Slop";
       slopSelect.appendChild(defaultOpt);
       SLOP_TYPES.forEach(t => {
         const opt = document.createElement('option');
-        opt.value = t.id;
-        opt.text = `${t.emoji} ${t.name}`;
+        opt.value = t.id; opt.text = `${t.emoji} ${t.name}`;
         if (t.id === suggestedType) opt.selected = true;
         slopSelect.appendChild(opt);
       });
       detailsDrawer.appendChild(slopSelect);
-
       const createCheck = (id, label) => {
         const div = document.createElement('label');
         div.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 0.75rem; margin-bottom: 4px; cursor: pointer;";
         const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.id = id;
-        div.appendChild(cb);
-        div.appendChild(document.createTextNode(label));
+        cb.type = 'checkbox'; cb.id = id;
+        div.appendChild(cb); div.appendChild(document.createTextNode(label));
         return { div, cb };
       };
-
       const check1 = createCheck('chk-acc', 'No accountable author');
       const check2 = createCheck('chk-fun', 'Contains funnel/CTA');
       const check3 = createCheck('chk-rep', 'Not replicable/Fake');
+      detailsDrawer.appendChild(check1.div);
+      detailsDrawer.appendChild(check2.div);
+      detailsDrawer.appendChild(check3.div);
       const shieldLabel = document.createElement('div');
       shieldLabel.innerText = "Shield Type (Optional):";
       shieldLabel.style.cssText = "font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; color: #536471; margin-top: 8px;";
       detailsDrawer.appendChild(shieldLabel);
-
       const shieldContainer = document.createElement('div');
       shieldContainer.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;";
-      
       const createShieldOption = (id, label, color) => {
         const div = document.createElement('label');
         div.style.cssText = `display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; color: ${color}; font-weight: bold;`;
         const radio = document.createElement('input');
-        radio.type = 'radio';
-        radio.name = 'shield-type';
-        radio.id = id;
-        radio.value = id;
-        div.appendChild(radio);
-        div.appendChild(document.createTextNode(label));
+        radio.type = 'radio'; radio.name = 'shield-type'; radio.id = id; radio.value = id;
+        div.appendChild(radio); div.appendChild(document.createTextNode(label));
         return { div, radio };
       };
-
       const optRed = createShieldOption('shield-red', '🚩 RED: Slop Factory', '#f4212e');
       const optBlue = createShieldOption('shield-blue', '🔵 BLUE: High AI Usage', '#1d9bf0');
       const optNone = createShieldOption('shield-none', '⚪ None (General Slop)', '#71767b');
       optNone.radio.checked = true;
-
       shieldContainer.appendChild(optRed.div);
       shieldContainer.appendChild(optBlue.div);
       shieldContainer.appendChild(optNone.div);
       detailsDrawer.appendChild(shieldContainer);
-
       reportBtn.onclick = () => {
         if (info) {
           const selectedShield = detailsDrawer.querySelector('input[name="shield-type"]:checked').value;
@@ -1140,40 +1080,22 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
             action: "manualReport",
             aiScore: currentAiScore,
             slopType: slopSelect.value,
-            extractionResults: {
-              accountability: check1.cb.checked,
-              funnel: check2.cb.checked,
-              replicability: check3.cb.checked
-            },
+            extractionResults: { accountability: check1.cb.checked, funnel: check2.cb.checked, replicability: check3.cb.checked },
             shieldType: selectedShield,
             ...info
           });
           reportBtn.innerText = '✅ Reported to Registry';
           reportBtn.style.background = '#00ba7c';
-          reportBtn.disabled = true;
-          toggleDetails.remove();
-          detailsDrawer.remove();
+          reportBtn.disabled = true; toggleDetails.remove(); detailsDrawer.remove();
         }
       };
-
       btnContainer.appendChild(toggleDetails);
       btnContainer.appendChild(detailsDrawer);
       btnContainer.appendChild(reportBtn);
     }
-
     const posterBtn = document.createElement('button');
     posterBtn.innerText = '🖼️ Generate Wanted Poster';
-    posterBtn.style.cssText = `
-      background: #1d9bf0;
-      color: white;
-      border: none;
-      padding: 10px;
-      border-radius: 20px;
-      cursor: pointer;
-      font-weight: bold;
-      width: 100%;
-      font-size: 0.9rem;
-    `;
+    posterBtn.style.cssText = `background: #1d9bf0; color: white; border: none; padding: 10px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.9rem;`;
     posterBtn.onclick = () => {
       if (info && info.author) {
         posterBtn.innerText = '⌛ Generating...';
@@ -1186,41 +1108,19 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
     btnContainer.appendChild(posterBtn);
     overlay.appendChild(btnContainer);
   }
-
   const closeBtn = document.createElement('button');
   closeBtn.innerText = '✕';
-  closeBtn.style.cssText = `
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    background: #eee;
-    border: none;
-    border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    color: #555;
-  `;
+  closeBtn.style.cssText = `position: absolute; top: 10px; right: 10px; background: #eee; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #555;`;
   closeBtn.onclick = () => overlay.remove();
-
   let isHovered = false;
   overlay.onmouseenter = () => { isHovered = true; };
   overlay.onmouseleave = () => { isHovered = false; };
-
   overlay.appendChild(closeBtn);
   document.body.appendChild(overlay);
-
   if (type !== 'error') {
     const timeoutDuration = type === 'success' ? 8000 : 4000;
     const attemptHide = () => {
-      if (isHovered) {
-        setTimeout(attemptHide, 2000); // Check again in 2s
-        return;
-      }
+      if (isHovered) { setTimeout(attemptHide, 2000); return; }
       if (overlay.parentNode) {
         overlay.style.opacity = '0';
         overlay.style.transition = 'opacity 0.5s';
@@ -1230,6 +1130,9 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
     setTimeout(attemptHide, timeoutDuration);
   }
 }
+
+initObservers();
+autoScanAmplifiers();
 
 if (!document.getElementById('zerogpt-styles')) {
   const style = document.createElement('style');
