@@ -196,7 +196,9 @@ function App() {
         }
         
         // Combine and calculate stats using the already parsed data
-        let totalCount = registryDocs.length + accountDocs.length + suspiciousDocs.length;
+        let localEventsCount = registryDocs.length + accountDocs.length + suspiciousDocs.length;
+        let totalCount = localEventsCount;
+        
         let totalAccountsCount = new Set([
           ...registryDocs.map(d => d.fields.author_handle?.stringValue),
           ...accountDocs.map(d => d.fields.handle?.stringValue),
@@ -208,7 +210,8 @@ function App() {
           const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || 0);
           const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || 0);
           
-          totalCount = Math.max(remoteTotal, totalCount);
+          // Use the higher of the two to ensure we don't "lose" counts during sync delays
+          totalCount = Math.max(remoteTotal, localEventsCount);
           totalAccountsCount = Math.max(remoteAccounts, totalAccountsCount);
         }
 

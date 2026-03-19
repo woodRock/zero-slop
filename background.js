@@ -342,7 +342,14 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
       const doc = await getResponse.json();
       existingFields = doc.fields || {};
       currentReports = parseInt(existingFields.manual_reports?.integerValue || 0);
+    } else {
+      // New account detected!
+      updateGlobalStats('total_accounts');
     }
+
+    // Every factory report is a slop detection event
+    updateGlobalStats('total_slops');
+    incrementSlopsCaught();
 
     const fields = {
       ...existingFields,
@@ -651,6 +658,10 @@ function saveToHistory(text, percentage, words) {
 async function storeSuspiciousAccount(handle, name, pfp, tweetId, factoryHandle = null) {
   const accountId = handle.replace('@', '').toLowerCase();
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+
+  // Every bot amplifier is a slop detection event
+  updateGlobalStats('total_slops');
+  incrementSlopsCaught();
 
   const fields = {
     handle: { stringValue: handle },
