@@ -532,6 +532,11 @@ function App() {
               <p style={{ marginBottom: '15px' }}>
                 Our community-curated dataset of AI slop, factory networks, and bot amplifiers is available for <strong>academic research and non-commercial use</strong> upon request. 
               </p>
+              <div style={{ marginBottom: '15px' }}>
+                <a href="mailto:j.r.h.wood98@gmail.com?subject=ZeroSlop%20Research%20Access%20Request" style={{ color: '#1d9bf0', textDecoration: 'underline', fontSize: '0.9rem' }}>
+                  Request Research Access Key →
+                </a>
+              </div>
               <div style={{ fontSize: '0.8rem', color: '#71767b', marginBottom: '20px', padding: '10px', background: '#000', borderRadius: '8px', border: '1px solid #2f3336' }}>
                 🛡️ PROTECTING THE HUMAN WEB: Access is restricted to prevent adversarial use by automated slop networks.
               </div>
