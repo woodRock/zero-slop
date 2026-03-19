@@ -130,11 +130,13 @@ function injectSlopFactoryBadge(container, handle) {
 
   badge.querySelector('.v-up').onclick = (e) => {
     e.stopPropagation();
+    e.preventDefault();
     chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
     badge.querySelector('.v-up').innerText = '✅';
   };
   badge.querySelector('.v-down').onclick = (e) => {
     e.stopPropagation();
+    e.preventDefault();
     chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
     badge.querySelector('.v-down').innerText = '❌';
   };
