@@ -19,20 +19,29 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [allDocs, setAllDocs] = useState([]);
+  const [allAccounts, setAllAccounts] = useState([]);
+  const [allSuspicious, setAllSuspicious] = useState([]);
   const [trendStats, setTrendStats] = useState({});
   const [activeMapHandle, setActiveMapHandle] = useState(null);
   
   const GOAL = 5000; // Community goal
 
   const getGlobalAudit = () => {
-    if (allDocs.length === 0) return null;
+    // Combine all detection events for a master list
+    const masterEvents = [
+      ...allDocs.map(d => ({ date: d.updateTime, score: d.fields.ai_score?.doubleValue || 0, handle: d.fields.author_handle?.stringValue })),
+      ...allAccounts.map(d => ({ date: d.updateTime || d.createTime, score: 100, handle: d.fields.handle?.stringValue })),
+      ...allSuspicious.map(d => ({ date: d.updateTime || d.createTime, score: 50, handle: d.fields.handle?.stringValue }))
+    ];
+
+    if (masterEvents.length === 0) return null;
 
     // Filter for last 7 days
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
-    const recentDocs = allDocs.filter(doc => new Date(doc.updateTime) > sevenDaysAgo);
-    const slopDocs = recentDocs.filter(doc => (doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0) > 15);
+    const recentEvents = masterEvents.filter(e => new Date(e.date) > sevenDaysAgo);
+    const slopDocs = allDocs.filter(doc => new Date(doc.updateTime) > sevenDaysAgo && (doc.fields.ai_score?.doubleValue || 0) > 15);
 
     // 1. Top Slop Factories (Accounts)
     const handleMap = {};
@@ -40,7 +49,7 @@ function App() {
       const handle = doc.fields.author_handle?.stringValue || "@anonymous";
       if (!handleMap[handle]) handleMap[handle] = { handle, count: 0, scores: [] };
       handleMap[handle].count++;
-      handleMap[handle].scores.push(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0);
+      handleMap[handle].scores.push(doc.fields.ai_score?.doubleValue || 0);
     });
 
     const topFactories = Object.values(handleMap)
@@ -62,7 +71,7 @@ function App() {
         if (['https', 'twitter', 'status', 'photo', 'thread', 'check', 'repost'].includes(w)) return;
         if (!keywordMap[w]) keywordMap[w] = { name: word, count: 0, scores: [] };
         keywordMap[w].count++;
-        keywordMap[w].scores.push(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0);
+        keywordMap[w].scores.push(doc.fields.ai_score?.doubleValue || 0);
       });
     });
 
@@ -75,23 +84,25 @@ function App() {
         count: t.count
       }));
 
-    // 3. Daily Slop Volume
+    // 3. Daily Slop Volume (Accurate aggregated counts)
     const dailyVolume = {};
     for (let i = 0; i < 7; i++) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       dailyVolume[d.toISOString().split('T')[0]] = 0;
     }
-    slopDocs.forEach(doc => {
-      const date = doc.updateTime.split('T')[0];
-      if (dailyVolume[date] !== undefined) dailyVolume[date]++;
+    recentEvents.forEach(event => {
+      if (event.date) {
+        const date = event.date.split('T')[0];
+        if (dailyVolume[date] !== undefined) dailyVolume[date]++;
+      }
     });
 
     return {
       title: "Global State of the Feed",
       date: `Week of ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`,
-      summary: `Our global registry analysis for the past 7 days shows ${slopDocs.length} confirmed AI-generated tweets. The timeline is currently ${Math.round((slopDocs.length / Math.max(recentDocs.length, 1)) * 100)}% sloppy.`,
-      totalSlops: slopDocs.length,
+      summary: `Our global registry analysis for the past 7 days shows ${recentEvents.length} total slop events detected (Tweets + Factory Reports + Amplifiers).`,
+      totalSlops: recentEvents.length,
       topTrends: topTrends,
       topFactories: topFactories,
       dailyVolume: Object.entries(dailyVolume).reverse()
@@ -114,6 +125,25 @@ function App() {
         const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
         const statsResponse = await fetch(statsUrl);
 
+        // Fetch all 3 collections in parallel for better speed and accuracy
+        const collections = ['slop_registry', 'slop_accounts', 'suspicious_accounts'];
+        const [regRes, accRes, suspRes] = await Promise.all(
+          collections.map(c => fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/${c}?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000&orderBy=last_updated desc&t=${Date.now()}`))
+        );
+
+        if (regRes.ok) {
+          const data = await regRes.json();
+          setAllDocs(data.documents || []);
+        }
+        if (accRes.ok) {
+          const data = await accRes.json();
+          setAllAccounts(data.documents || []);
+        }
+        if (suspRes.ok) {
+          const data = await suspRes.json();
+          setAllSuspicious(data.documents || []);
+        }
+
         const trendsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends?key=${FIREBASE_CONFIG.apiKey}&pageSize=100`;
         const trendsResponse = await fetch(trendsUrl);
         if (trendsResponse.ok) {
@@ -126,16 +156,12 @@ function App() {
           setTrendStats(trendMap);
         }
         
-        const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000&orderBy=last_updated desc&t=${Date.now()}`;
-        const response = await fetch(url);
-        
-        if (response.ok) {
-          const data = await response.json();
+        if (regRes.ok) {
+          const data = await regRes.json();
           const documents = data.documents || [];
-          setAllDocs(documents);
           
           let totalCount = documents.length;
-          let totalAccounts = new Set(documents.map(d => d.fields.author_handle?.stringValue)).size;
+          let totalAccountsCount = new Set(documents.map(d => d.fields.author_handle?.stringValue)).size;
 
           if (statsResponse.ok) {
             const statsData = await statsResponse.json();
@@ -143,12 +169,12 @@ function App() {
             const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || 0);
             
             totalCount = Math.max(remoteTotal, totalCount);
-            totalAccounts = Math.max(remoteAccounts, totalAccounts);
+            totalAccountsCount = Math.max(remoteAccounts, totalAccountsCount);
           }
 
           setStats({
             count: totalCount.toLocaleString(),
-            accounts: totalAccounts.toLocaleString(),
+            accounts: totalAccountsCount.toLocaleString(),
             rawCount: totalCount
           });
 
@@ -183,13 +209,15 @@ function App() {
     }
     
     const handleMap = {};
-    allDocs.forEach(doc => {
-      const handle = doc.fields.author_handle?.stringValue;
+    // Search across all sources
+    [...allDocs, ...allAccounts, ...allSuspicious].forEach(doc => {
+      const handle = doc.fields.author_handle?.stringValue || doc.fields.handle?.stringValue;
       if (handle && handle.toLowerCase().includes(query.replace('@', ''))) {
         if (!handleMap[handle]) {
           handleMap[handle] = { handle, scores: [], count: 0 };
         }
-        handleMap[handle].scores.push(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0);
+        const score = doc.fields.ai_score?.doubleValue || (doc.fields.manual_reports ? 100 : 50);
+        handleMap[handle].scores.push(score);
         handleMap[handle].count++;
       }
     });
@@ -214,18 +242,24 @@ function App() {
 
   const getTrendsData = () => {
     const days = {};
-    const docCounts = {};
     const today = new Date();
-    allDocs.forEach(doc => {
-      const dateStr = doc.updateTime.split('T')[0];
-      docCounts[dateStr] = (docCounts[dateStr] || 0) + 1;
+
+    // 1. Group all current docs by day
+    const allCurrentEvents = [...allDocs, ...allAccounts, ...allSuspicious];
+    const docCounts = {};
+    allCurrentEvents.forEach(doc => {
+      const dateStr = (doc.updateTime || doc.createTime)?.split('T')[0];
+      if (dateStr) docCounts[dateStr] = (docCounts[dateStr] || 0) + 1;
     });
-    for (let i = 0; i < 10; i++) {
+
+    // 2. Aggregate with historical trendStats
+    for (let i = 0; i < 7; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() - i);
       const dateStr = date.toISOString().split('T')[0];
       days[dateStr] = Math.max(trendStats[dateStr] || 0, docCounts[dateStr] || 0);
     }
+
     return Object.entries(days).reverse();
   };
 
