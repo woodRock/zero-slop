@@ -71,8 +71,8 @@ function App() {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
-    const recentEvents = masterEvents.filter(e => new Date(e.date) > sevenDaysAgo);
-    const slopDocs = allDocs.filter(doc => new Date(doc.updateTime) > sevenDaysAgo && (doc.fields.ai_score?.doubleValue || 0) > 15);
+    const recentEvents = masterEvents.filter(e => e.date && new Date(e.date) > sevenDaysAgo);
+    const slopDocs = allDocs.filter(doc => doc.updateTime && new Date(doc.updateTime) > sevenDaysAgo && (doc.fields.ai_score?.doubleValue || 0) > 15);
 
     // 1. Top Slop Factories (Accounts)
     const handleMap = {};
@@ -115,7 +115,7 @@ function App() {
         count: t.count
       }));
 
-    // 3. Daily Slop Volume (Accurate aggregated counts)
+    // 3. Daily Slop Volume
     const dailyVolume = {};
     for (let i = 0; i < 7; i++) {
       const d = new Date();
@@ -148,40 +148,46 @@ function App() {
     const searchVal = params.get('search');
     if (searchVal) {
       setSearchQuery('@' + searchVal);
-      // Data is fetched in the useEffect below, so wait slightly
-      setTimeout(() => handleMapOpen('@' + searchVal), 2000);
+      // Wait for data to load
+      setTimeout(() => {
+        handleMapOpen('@' + searchVal);
+      }, 2000);
     }
+
+    const fetchAllPages = async (collection) => {
+      let allDocsArr = [];
+      let pageToken = "";
+      
+      try {
+        do {
+          const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/${collection}?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000&orderBy=last_updated desc&pageToken=${pageToken}&t=${Date.now()}`;
+          const res = await fetch(url);
+          if (!res.ok) break;
+          const data = await res.json();
+          if (data.documents) allDocsArr = [...allDocsArr, ...data.documents];
+          pageToken = data.nextPageToken || "";
+        } while (pageToken);
+      } catch (e) {
+        console.error(`Error fetching ${collection}:`, e);
+      }
+      return allDocsArr;
+    };
 
     const fetchRegistryData = async () => {
       try {
         const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
         const statsResponse = await fetch(statsUrl);
 
-        // Fetch all 3 collections in parallel for better speed and accuracy
-        const collections = ['slop_registry', 'slop_accounts', 'suspicious_accounts'];
-        const [regRes, accRes, suspRes] = await Promise.all(
-          collections.map(c => fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/${c}?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000&orderBy=last_updated desc&t=${Date.now()}`))
-        );
+        // Fetch all 3 collections concurrently, handling all pages
+        const [registryDocs, accountDocs, suspiciousDocs] = await Promise.all([
+          fetchAllPages('slop_registry'),
+          fetchAllPages('slop_accounts'),
+          fetchAllPages('suspicious_accounts')
+        ]);
 
-        let registryDocs = [];
-        let accountDocs = [];
-        let suspiciousDocs = [];
-
-        if (regRes.ok) {
-          const data = await regRes.json();
-          registryDocs = data.documents || [];
-          setAllDocs(registryDocs);
-        }
-        if (accRes.ok) {
-          const data = await accRes.json();
-          accountDocs = data.documents || [];
-          setAllAccounts(accountDocs);
-        }
-        if (suspRes.ok) {
-          const data = await suspRes.json();
-          suspiciousDocs = data.documents || [];
-          setAllSuspicious(suspiciousDocs);
-        }
+        setAllDocs(registryDocs);
+        setAllAccounts(accountDocs);
+        setAllSuspicious(suspiciousDocs);
 
         const trendsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends?key=${FIREBASE_CONFIG.apiKey}&pageSize=100`;
         const trendsResponse = await fetch(trendsUrl);
@@ -195,7 +201,7 @@ function App() {
           setTrendStats(trendMap);
         }
         
-        // Combine and calculate stats using the already parsed data
+        // Combine and calculate stats
         let localEventsCount = registryDocs.length + accountDocs.length + suspiciousDocs.length;
         let totalCount = localEventsCount;
         
@@ -210,7 +216,6 @@ function App() {
           const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || 0);
           const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || 0);
           
-          // Use the higher of the two to ensure we don't "lose" counts during sync delays
           totalCount = Math.max(remoteTotal, localEventsCount);
           totalAccountsCount = Math.max(remoteAccounts, totalAccountsCount);
         }
@@ -561,7 +566,7 @@ function App() {
                         "Tweet", 
                         escapeCSV(d.fields.author_handle?.stringValue), 
                         escapeCSV(d.fields.text?.stringValue), 
-                        d.fields.ai_score?.doubleValue || 0, 
+                        d.fields.ai_score?.doubleValue || d.fields.ai_score?.integerValue || 0, 
                         escapeCSV(d.updateTime)
                       ]),
                       ...allAccounts.map(d => [
@@ -569,14 +574,14 @@ function App() {
                         escapeCSV(d.fields.handle?.stringValue), 
                         "N/A", 
                         100, 
-                        escapeCSV(d.updateTime)
+                        escapeCSV(d.updateTime || d.createTime)
                       ]),
                       ...allSuspicious.map(d => [
                         "Amplifier", 
                         escapeCSV(d.fields.handle?.stringValue), 
                         "N/A", 
                         50, 
-                        escapeCSV(d.updateTime)
+                        escapeCSV(d.updateTime || d.createTime)
                       ])
                     ];
                     
@@ -685,7 +690,7 @@ function App() {
             ))}
           </div>
           <div style={{ fontSize: '0.75rem', color: '#71767b', padding: '5px 10px', textAlign: 'center' }}>
-            Daily slop detections are {trends[6][1] > trends[5][1] ? 'up' : 'down'} today
+            Daily slop detections are {trends.length >= 7 && trends[6][1] > trends[5][1] ? 'up' : 'down'} today
           </div>
         </div>
 
