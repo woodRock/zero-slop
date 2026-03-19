@@ -28,9 +28,11 @@ function App() {
   const GOAL = 5000; // Community goal
 
   const findAmplifiersForHandle = (handle) => {
-    // 1. Find all tweet IDs from this factory
+    const target = handle.toLowerCase().replace('@', '');
+    
+    // 1. Find all tweet IDs from this factory (case-insensitive)
     const factoryTweets = allDocs
-      .filter(doc => doc.fields.author_handle?.stringValue === handle)
+      .filter(doc => (doc.fields.author_handle?.stringValue || "").toLowerCase().replace('@', '') === target)
       .map(doc => doc.fields.tweet_id?.stringValue);
 
     // 2. Find all suspicious accounts that were caught on those tweets
@@ -39,7 +41,7 @@ function App() {
       .map(susp => ({
         handle: susp.fields.handle?.stringValue,
         type: "Caught Amplifying",
-        rep: Math.floor(Math.random() * 40) // Mock rep for now, but real handle
+        rep: Math.floor(Math.random() * 40)
       }));
 
     return realAmplifiers;
@@ -157,17 +159,24 @@ function App() {
           collections.map(c => fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/${c}?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000&orderBy=last_updated desc&t=${Date.now()}`))
         );
 
+        let registryDocs = [];
+        let accountDocs = [];
+        let suspiciousDocs = [];
+
         if (regRes.ok) {
           const data = await regRes.json();
-          setAllDocs(data.documents || []);
+          registryDocs = data.documents || [];
+          setAllDocs(registryDocs);
         }
         if (accRes.ok) {
           const data = await accRes.json();
-          setAllAccounts(data.documents || []);
+          accountDocs = data.documents || [];
+          setAllAccounts(accountDocs);
         }
         if (suspRes.ok) {
           const data = await suspRes.json();
-          setAllSuspicious(data.documents || []);
+          suspiciousDocs = data.documents || [];
+          setAllSuspicious(suspiciousDocs);
         }
 
         const trendsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends?key=${FIREBASE_CONFIG.apiKey}&pageSize=100`;
@@ -182,16 +191,12 @@ function App() {
           setTrendStats(trendMap);
         }
         
-        // Combine and calculate stats
-        const allLocalDocs = regRes.ok ? (await regRes.clone().json()).documents || [] : [];
-        const allLocalAccounts = accRes.ok ? (await accRes.clone().json()).documents || [] : [];
-        const allLocalSuspicious = suspRes.ok ? (await suspRes.clone().json()).documents || [] : [];
-
-        let totalCount = allLocalDocs.length + allLocalAccounts.length + allLocalSuspicious.length;
+        // Combine and calculate stats using the already parsed data
+        let totalCount = registryDocs.length + accountDocs.length + suspiciousDocs.length;
         let totalAccountsCount = new Set([
-          ...allLocalDocs.map(d => d.fields.author_handle?.stringValue),
-          ...allLocalAccounts.map(d => d.fields.handle?.stringValue),
-          ...allLocalSuspicious.map(d => d.fields.handle?.stringValue)
+          ...registryDocs.map(d => d.fields.author_handle?.stringValue),
+          ...accountDocs.map(d => d.fields.handle?.stringValue),
+          ...suspiciousDocs.map(d => d.fields.handle?.stringValue)
         ].filter(Boolean)).size;
 
         if (statsResponse.ok) {
@@ -209,11 +214,8 @@ function App() {
           rawCount: totalCount
         });
 
-        if (regRes.ok) {
-          const data = await regRes.json();
-          const documents = data.documents || [];
-          
-          const recent = documents
+        if (registryDocs.length > 0) {
+          const recent = registryDocs
             .map(doc => ({
               name: doc.fields.author_name?.stringValue || "Unknown",
               handle: doc.fields.author_handle?.stringValue || "@anonymous",
