@@ -944,13 +944,110 @@ function handleAutoAction(container, percentage) {
       const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
       if (!contentDiv) return;
       if (action === 'zap') { 
-        container.style.animation = 'zerogptSnap 0.8s forwards ease-in';
-        container.style.pointerEvents = 'none';
-        setTimeout(() => {
-          container.style.display = 'none'; 
-        }, 800);
+        runThanosSnap(container);
       } 
       else if (action === 'blur') {
+...
+async function runThanosSnap(element) {
+  const rect = element.getBoundingClientRect();
+  const canvas = await elementToCanvas(element);
+  if (!canvas) {
+    element.style.display = 'none';
+    return;
+  }
+
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const pixelArr = imageData.data;
+  
+  const layerCount = 32;
+  const layers = Array.from({ length: layerCount }, () => {
+    const c = document.createElement('canvas');
+    c.width = canvas.width;
+    c.height = canvas.height;
+    c.style.cssText = `
+      position: absolute;
+      left: ${rect.left + window.scrollX}px;
+      top: ${rect.top + window.scrollY}px;
+      width: ${rect.width}px;
+      height: ${rect.height}px;
+      pointer-events: none;
+      z-index: 2147483646;
+      transition: transform 1s ease-out, opacity 1s ease-out, filter 1s ease-out;
+    `;
+    return c;
+  });
+
+  // Distribute pixels
+  for (let i = 0; i < pixelArr.length; i += 4) {
+    const layerIndex = Math.floor(Math.random() * layerCount);
+    const layerCtx = layers[layerIndex].getContext('2d');
+    const x = (i / 4) % canvas.width;
+    const y = Math.floor((i / 4) / canvas.width);
+    
+    layerCtx.fillStyle = `rgba(${pixelArr[i]}, ${pixelArr[i+1]}, ${pixelArr[i+2]}, ${pixelArr[i+3]/255})`;
+    layerCtx.fillRect(x, y, 1, 1);
+  }
+
+  // Hide real element and show dust
+  element.style.opacity = '0';
+  element.style.pointerEvents = 'none';
+  
+  layers.forEach((l, i) => {
+    document.body.appendChild(l);
+    
+    // Animate instantly (fast snap)
+    setTimeout(() => {
+      const angle = (Math.random() - 0.5) * 2 * Math.PI;
+      const drift = 50 + Math.random() * 100;
+      l.style.transform = `translate(${Math.cos(angle) * drift}px, ${Math.sin(angle) * drift - 50}px) rotate(${(Math.random() - 0.5) * 20}deg)`;
+      l.style.opacity = '0';
+      l.style.filter = 'blur(1px)';
+    }, i * 15); // Staggered for smoother effect but still fast
+
+    setTimeout(() => {
+      l.remove();
+      if (i === layerCount - 1) element.style.display = 'none';
+    }, 1200);
+  });
+}
+
+function elementToCanvas(el) {
+  return new Promise((resolve) => {
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    if (width === 0 || height === 0) return resolve(null);
+
+    // Capture clone to avoid capturing the extension UI inside the element
+    const clone = el.cloneNode(true);
+    clone.style.width = width + 'px';
+    clone.style.height = height + 'px';
+    
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+        <foreignObject width="100%" height="100%">
+          <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: sans-serif; color: white; background: transparent;">
+            ${el.innerHTML.replace(/&nbsp;/g, ' ')}
+          </div>
+        </foreignObject>
+      </svg>`;
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const img = new Image();
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    
+    img.onload = () => {
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      resolve(canvas);
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
         contentDiv.style.filter = 'blur(8px)';
         contentDiv.style.opacity = '0.6';
         contentDiv.style.transition = 'all 0.3s ease';
