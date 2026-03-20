@@ -365,13 +365,13 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
   const commitUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
 
   try {
-    // 1. First, check if document exists to track total_accounts correctly
+    // Check if new account
     const getResponse = await fetch(baseUrl);
     if (!getResponse.ok) {
       updateGlobalStats('total_accounts');
     }
 
-    // 2. Set/Update metadata using PATCH (Non-atomic for text fields is fine)
+    // Prepare metadata
     const fields = {
       handle: { stringValue: author.handle },
       name: { stringValue: author.name || "" },
@@ -380,40 +380,39 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
       last_reported: { timestampValue: new Date().toISOString() }
     };
 
-    let maskParams = "";
-    Object.keys(fields).forEach(key => {
-      maskParams += `&updateMask.fieldPaths=${key}`;
-    });
-
-    await fetch(baseUrl + maskParams, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields })
-    });
-
-    // 3. Atomically increment the report counter
+    // Prepare commit body for BOTH metadata update AND atomic increment
     const body = {
-      writes: [{
-        transform: {
-          document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}`,
-          fieldTransforms: [{
-            fieldPath: "manual_reports",
-            integerIncrement: { integerValue: 1 }
-          }]
+      writes: [
+        {
+          update: {
+            name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}`,
+            fields: fields
+          }
+        },
+        {
+          transform: {
+            document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}`,
+            fieldTransforms: [{
+              fieldPath: "manual_reports",
+              integerIncrement: { integerValue: 1 }
+            }]
+          }
         }
-      }]
+      ]
     };
 
-    await fetch(commitUrl, {
+    const response = await fetch(commitUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
 
-    // Global stats update
-    updateGlobalStats('total_slops');
-    incrementSlopsCaught();
-
+    if (response.ok) {
+      console.log(`ZeroSlop: Successfully reported factory ${author.handle}`);
+      // Increment global slop count for the report
+      updateGlobalStats('total_slops');
+      incrementSlopsCaught();
+    }
   } catch (e) {
     console.error("ZeroSlop: Error reporting slop factory (atomic)", e);
   }
@@ -448,6 +447,7 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
         
         if (percentage > 15) {
           incrementSlopsCaught();
+          updateGlobalStats('total_slops');
         }
 
         if (tweetId) {
