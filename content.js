@@ -940,7 +940,15 @@ function handleAutoAction(container, percentage) {
       const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
       if (!contentDiv) return;
       if (action === 'zap') { 
-        runThanosSnap(container);
+        // 1. Initial "Snap" Pulse
+        container.style.transition = 'none';
+        container.style.animation = 'zerogptSnap 1.5s forwards ease-in-out';
+        container.style.pointerEvents = 'none';
+        
+        // 2. Physical removal after animation finishes
+        setTimeout(() => {
+          container.style.display = 'none'; 
+        }, 1500);
       } 
       else if (action === 'blur') {
         contentDiv.style.filter = 'blur(8px)';
@@ -1277,20 +1285,21 @@ if (!document.getElementById('zerogpt-styles')) {
     }
     @keyframes zerogptSnap {
       0% { 
-        filter: blur(0) brightness(1); 
-        transform: scale(1);
+        filter: blur(0) brightness(1) grayscale(0); 
+        transform: scale(1) rotate(0);
+        opacity: 1;
       }
       10% { 
-        filter: blur(1px) brightness(1.2); 
-        transform: translateX(-2px) rotate(-0.5deg);
+        filter: blur(1px) brightness(1.5) grayscale(0.2); 
+        transform: scale(1.05) rotate(0.5deg) translateX(-2px);
       }
-      20% {
-        filter: blur(2px) brightness(1.5);
-        transform: translateX(2px) rotate(0.5deg);
+      30% {
+        filter: blur(3px) brightness(1.2) grayscale(0.5) sepia(0.5);
+        transform: scale(1.02) rotate(-0.5deg) translateX(2px);
       }
       100% { 
-        filter: blur(20px) brightness(0.8) sepia(1) contrast(1.2) hue-rotate(-30deg);
-        transform: scale(0.9) translate(150px, -60px) rotate(-10deg) skew(20deg);
+        filter: blur(30px) brightness(0.5) grayscale(1) sepia(1) contrast(1.5);
+        transform: scale(0.8) translate(200px, -100px) rotate(15deg) skew(20deg);
         opacity: 0;
       }
     }
