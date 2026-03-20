@@ -152,21 +152,21 @@ function App() {
   useEffect(() => {
     const fetchRegistryData = async () => {
       try {
-        const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
+        const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}&t=${Date.now()}`;
         const statsResponse = await fetch(statsUrl);
 
         const recentRes = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=5&orderBy=last_updated desc&t=${Date.now()}`);
 
         if (statsResponse.ok) {
           const statsData = await statsResponse.json();
-          const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || 0);
-          const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || 0);
+          const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || statsData.fields.total_slops?.doubleValue || 0);
+          const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || statsData.fields.total_accounts?.doubleValue || 0);
           
           // Load pre-aggregated daily stats
           const dailyMap = statsData.fields.daily_stats?.mapValue?.fields || {};
           const tMap = {};
           Object.keys(dailyMap).forEach(date => {
-            tMap[date] = parseInt(dailyMap[date]?.integerValue || 0);
+            tMap[date] = parseInt(dailyMap[date]?.integerValue || dailyMap[date]?.doubleValue || 0);
           });
           setTrendStats(tMap);
 
@@ -198,6 +198,8 @@ function App() {
       } catch (e) { console.error("ZeroSlop: Failed to fetch live stats", e); }
     };
     fetchRegistryData();
+    const interval = setInterval(fetchRegistryData, 30000); // Live refresh every 30s
+    return () => clearInterval(interval);
   }, []);
 
   const handleSearch = async (e) => {
