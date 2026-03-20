@@ -1060,22 +1060,6 @@ function elementToCanvas(el) {
     img.src = url;
   });
 }
-        contentDiv.style.filter = 'blur(8px)';
-        contentDiv.style.opacity = '0.6';
-        contentDiv.style.transition = 'all 0.3s ease';
-        contentDiv.style.cursor = 'pointer';
-        contentDiv.title = 'Click to reveal AI Slop';
-        contentDiv.addEventListener('click', function reveal() {
-          contentDiv.style.filter = 'none';
-          contentDiv.style.opacity = '1';
-          contentDiv.style.cursor = 'default';
-          contentDiv.title = '';
-          contentDiv.removeEventListener('click', reveal);
-        });
-      }
-    }
-  });
-}
 
 function showOverlay(message, type = "info", currentAiScore = 0) {
   const existing = document.getElementById('zerogpt-overlay');
