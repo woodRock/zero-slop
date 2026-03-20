@@ -943,7 +943,23 @@ function handleAutoAction(container, percentage) {
         runThanosSnap(container);
       } 
       else if (action === 'blur') {
-...
+        contentDiv.style.filter = 'blur(8px)';
+        contentDiv.style.opacity = '0.6';
+        contentDiv.style.transition = 'all 0.3s ease';
+        contentDiv.style.cursor = 'pointer';
+        contentDiv.title = 'Click to reveal AI Slop';
+        contentDiv.addEventListener('click', function reveal() {
+          contentDiv.style.filter = 'none';
+          contentDiv.style.opacity = '1';
+          contentDiv.style.cursor = 'default';
+          contentDiv.title = '';
+          contentDiv.removeEventListener('click', reveal);
+        });
+      }
+    }
+  });
+}
+
 async function runThanosSnap(element) {
   const rect = element.getBoundingClientRect();
   const canvas = await elementToCanvas(element);
