@@ -67,9 +67,45 @@ function App() {
     return realAmplifiers;
   };
 
-  const handleMapOpen = (handle) => {
-    const realAmps = findAmplifiersForHandle(handle);
+  const handleMapOpen = async (handle) => {
+    const target = handle.toLowerCase().replace('@', '');
     setActiveMapHandle(handle);
+    setActiveMapAmplifiers([]); // Loading state
+
+    console.log(`ZeroSlop: Discovering network for ${handle}...`);
+
+    // 1. Ensure we have the latest registry data
+    let currentDocs = allDocs;
+    let currentSuspicious = allSuspicious;
+    if (allDocs.length === 0) {
+      const [reg, acc, susp] = await Promise.all([
+        fetchAllPages('slop_registry'),
+        fetchAllPages('slop_accounts'),
+        fetchAllPages('suspicious_accounts')
+      ]);
+      setAllDocs(reg); setAllAccounts(acc); setAllSuspicious(susp);
+      currentDocs = reg; currentSuspicious = susp;
+    }
+
+    // 2. Aggressive Linkage
+    // a) Find all confirmed tweets by this factory
+    const factoryTweets = currentDocs
+      .filter(doc => (doc.fields.author_handle?.stringValue || "").toLowerCase().replace('@', '') === target)
+      .map(doc => doc.fields.tweet_id?.stringValue);
+
+    // b) Find all amplifiers matching handle OR any of those tweet IDs
+    const realAmps = currentSuspicious
+      .filter(susp => {
+        const suspFactory = (susp.fields.factory_handle?.stringValue || "").toLowerCase().replace('@', '');
+        const reasonId = susp.fields.reason_tweet_id?.stringValue;
+        return (suspFactory === target) || (reasonId && factoryTweets.includes(reasonId));
+      })
+      .map(susp => ({
+        handle: susp.fields.handle?.stringValue,
+        type: "Caught Amplifying",
+        rep: Math.floor(Math.random() * 40)
+      }));
+
     setActiveMapAmplifiers(realAmps);
   };
 

@@ -773,25 +773,43 @@ function injectListAuditorButton() {
 function autoScanAmplifiers() {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('zerogpt_scan') === 'true') {
+    console.log("ZeroSlop: Bounty Hunter active. Scanning bot network...");
+    
     let scanCount = 0;
     const scanInterval = setInterval(() => {
       const userCells = document.querySelectorAll('[data-testid="UserCell"]');
-      if (userCells.length > 0 || scanCount > 10) {
+      if (userCells.length > 0 || scanCount > 15) {
         clearInterval(scanInterval);
+        
         const match = window.location.pathname.match(/\/status\/(\d+)/);
         const tweetId = match ? match[1] : null;
+
+        // Try to get handle from the page if possible (e.g. from the tweet being retweeted)
+        let foundFactoryHandle = null;
+        const authorEl = document.querySelector('[data-testid="User-Name"] a');
+        if (authorEl && authorEl.innerText.startsWith('@')) {
+          foundFactoryHandle = authorEl.innerText;
+        }
+
         chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: tweetId }, (regData) => {
-          const factoryHandle = regData?.author_handle;
+          const factoryHandle = foundFactoryHandle || regData?.author_handle;
+
           userCells.forEach(cell => {
-            const handleEl = cell.querySelector('span:nth-child(2)');
-            if (handleEl && handleEl.innerText.startsWith('@')) {
-              const handle = handleEl.innerText;
-              const nameEl = cell.querySelector('span:nth-child(1)');
+            const spans = cell.querySelectorAll('span');
+            let handle = null;
+            let name = null;
+            
+            // Twitter's UserCell usually has name in 1st/2nd span and handle in another
+            spans.forEach(s => {
+              if (s.innerText.startsWith('@')) handle = s.innerText;
+            });
+
+            if (handle) {
               const pfpEl = cell.querySelector('img');
               chrome.runtime.sendMessage({
                 action: "reportSuspicious",
                 handle: handle,
-                name: nameEl?.innerText,
+                name: name || handle,
                 pfp: pfpEl?.src,
                 tweetId: tweetId,
                 factoryHandle: factoryHandle
@@ -799,7 +817,11 @@ function autoScanAmplifiers() {
             }
           });
         });
-        setTimeout(() => { chrome.runtime.sendMessage({ action: "closeScanTab" }); }, 1000);
+        
+        console.log(`ZeroSlop: Scanned ${userCells.length} potential bots. Mission complete.`);
+        setTimeout(() => {
+          chrome.runtime.sendMessage({ action: "closeScanTab" });
+        }, 1500);
       }
       scanCount++;
     }, 1000);

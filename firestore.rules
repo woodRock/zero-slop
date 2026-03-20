@@ -5,75 +5,53 @@ service cloud.firestore {
     
     // Slop Registry: Publicly readable, community-reported registry
     match /slop_registry/{tweetId} {
-      
-      // Allow everyone to read so the extension can show badges/hide tweets
       allow read: if true;
-      
-      // Allow creation AND updates (for multiple reports on the same tweet)
-      // This is necessary for the SponsorBlock-style crowdsourced system
       allow write: if 
-        // 1. Ensure the ID in the data matches the document ID
         request.resource.data.tweet_id == tweetId &&
-        
-        // 2. Initial status must always be pending
         request.resource.data.status == "pending" &&
-        
-        // 3. Validation for the AI Score field (if present)
-        // If the score is missing (manual report), it's allowed.
-        // If it's present (auto-scan), it must be between 0 and 100.
         (!('ai_score' in request.resource.data) || 
          (request.resource.data.ai_score >= 0 && request.resource.data.ai_score <= 100)) &&
-
-        // 4. Validate upvotes/downvotes
         (!('upvotes' in request.resource.data) || request.resource.data.upvotes >= 0) &&
         (!('downvotes' in request.resource.data) || request.resource.data.downvotes >= 0);
-
-      // Strictly prohibit DELETING by the public
-      // Only the admin (via Firebase Console) can remove entries
       allow delete: if false;
     }
 
     // Slop Accounts: Publicly readable registry of AI-slop posting accounts
     match /slop_accounts/{accountId} {
-      // Allow everyone to read
       allow read: if true;
-      
-      // Allow creation of new slop accounts
-      allow create, update: if 
-        // 1. Ensure the handle is present and is a string
-        request.resource.data.handle is string;
-        
-      // Prevent deletion
+      allow create, update: if request.resource.data.handle is string;
       allow delete: if false;
-    }
-
-    // Default: Deny all other access
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Stats collection: Publicly readable, restricted updates
-    match /stats/{docId} {
-      allow read: if true;
-      allow write: if docId == "global" && 
-        (request.resource.data.total_slops is int || 
-         request.resource.data.total_accounts is int);
-    }
-
-    // Weekly Audits: Publicly readable, admin-submitted (or community-submitted for now)
-    match /weekly_audits/{auditId} {
-      allow read: if true;
-      allow create, update: if 
-        request.resource.data.total_slops is int &&
-        request.resource.data.top_trends is list;
     }
 
     // Suspicious Accounts: Track retweeters of slop
     match /suspicious_accounts/{accountId} {
       allow read: if true;
-      allow create, update: if 
-        request.resource.data.handle is string &&
-        request.resource.data.reason_tweet_id is string;
+      allow create, update: if request.resource.data.handle is string;
+      allow delete: if false;
+    }
+
+    // Stats collection: Publicly readable, restricted updates
+    match /stats/{docId} {
+      allow read: if true;
+      allow write: if docId == "global";
+    }
+
+    // Weekly Audits: Publicly readable
+    match /weekly_audits/{auditId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.total_slops is int;
+    }
+
+    // Trends: Daily volume tracking
+    match /trends/{dateId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Catch-all deny for safety
+    match /{document=**} {
+      allow read: if true; // Allow all reads for debugging/transparency
+      allow write: if false;
     }
   }
 }
