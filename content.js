@@ -943,7 +943,13 @@ function handleAutoAction(container, percentage) {
     if (percentage >= threshold) {
       const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
       if (!contentDiv) return;
-      if (action === 'zap') { container.style.display = 'none'; } 
+      if (action === 'zap') { 
+        container.style.animation = 'zerogptSnap 0.8s forwards ease-in';
+        container.style.pointerEvents = 'none';
+        setTimeout(() => {
+          container.style.display = 'none'; 
+        }, 800);
+      } 
       else if (action === 'blur') {
         contentDiv.style.filter = 'blur(8px)';
         contentDiv.style.opacity = '0.6';
@@ -1141,6 +1147,11 @@ if (!document.getElementById('zerogpt-styles')) {
     @keyframes zerogptSlideIn {
       from { transform: translateX(120%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes zerogptSnap {
+      0% { transform: scale(1); filter: blur(0); opacity: 1; }
+      25% { transform: scale(1.02) rotate(0.5deg); filter: blur(1px); }
+      100% { transform: scale(0.8) translateY(-20px) rotate(-2deg); filter: blur(20px); opacity: 0; }
     }
   `;
   document.head.appendChild(style);
