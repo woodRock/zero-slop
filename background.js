@@ -394,9 +394,8 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
             document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}`,
             fieldTransforms: [{
               fieldPath: "manual_reports",
-              integerIncrement: { integerValue: 1 }
-            }]
-          }
+              increment: { integerValue: 1 }
+            }]          }
         }
       ]
     };
@@ -482,7 +481,7 @@ async function updateDailyTrend() {
         document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global`,
         fieldTransforms: [{
           fieldPath: `daily_stats.\`${dateStr}\``,
-          integerIncrement: { integerValue: 1 }
+          increment: { integerValue: 1 }
         }, {
           fieldPath: "last_updated",
           setToServerValue: "REQUEST_TIME"
@@ -520,12 +519,11 @@ async function updateGlobalStats(fieldName = 'total_slops') {
         document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global`,
         fieldTransforms: [{
           fieldPath: fieldName,
-          integerIncrement: { integerValue: 1 }
+          increment: { integerValue: 1 }
         }, {
           fieldPath: "last_updated",
           setToServerValue: "REQUEST_TIME"
-        }]
-      }
+        }]      }
     }]
   };
 
@@ -634,7 +632,7 @@ async function voteSlopAccount(handle, voteType) {
         document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}`,
         fieldTransforms: [{
           fieldPath: fieldName,
-          integerIncrement: { integerValue: 1 }
+          increment: { integerValue: 1 }
         }]
       }
     }]
@@ -661,7 +659,7 @@ async function voteSlopTweet(tweetId, voteType) {
         document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}`,
         fieldTransforms: [{
           fieldPath: fieldName,
-          integerIncrement: { integerValue: 1 }
+          increment: { integerValue: 1 }
         }]
       }
     }]
