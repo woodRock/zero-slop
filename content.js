@@ -968,15 +968,22 @@ async function runThanosSnap(element) {
     return;
   }
 
+  // 1. Initial "Snap" Jitter
+  element.style.transition = 'all 0.3s ease';
+  element.style.transform = 'scale(1.05)';
+  element.style.filter = 'brightness(1.5) blur(1px)';
+  
   const ctx = canvas.getContext('2d');
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const { width, height } = canvas;
+  const imageData = ctx.getImageData(0, 0, width, height);
   const pixelArr = imageData.data;
   
+  // Create 32 layers for the "dust"
   const layerCount = 32;
   const layers = Array.from({ length: layerCount }, () => {
     const c = document.createElement('canvas');
-    c.width = canvas.width;
-    c.height = canvas.height;
+    c.width = width;
+    c.height = height;
     c.style.cssText = `
       position: absolute;
       left: ${rect.left + window.scrollX}px;
@@ -985,43 +992,64 @@ async function runThanosSnap(element) {
       height: ${rect.height}px;
       pointer-events: none;
       z-index: 2147483646;
-      transition: transform 1s ease-out, opacity 1s ease-out, filter 1s ease-out;
+      transition: transform 1.5s ease-out, opacity 1.5s ease-out, filter 1.5s ease-out;
     `;
     return c;
   });
 
-  // Distribute pixels
+  // 2. Distribute pixels with a horizontal bias (the "Sweep")
   for (let i = 0; i < pixelArr.length; i += 4) {
-    const layerIndex = Math.floor(Math.random() * layerCount);
-    const layerCtx = layers[layerIndex].getContext('2d');
-    const x = (i / 4) % canvas.width;
-    const y = Math.floor((i / 4) / canvas.width);
+    // Skip transparent pixels
+    if (pixelArr[i+3] === 0) continue;
+
+    const x = (i / 4) % width;
+    const y = Math.floor((i / 4) / width);
     
+    // Pick a layer based on X-coordinate + randomness to create a "trailing" edge
+    const normalizedX = x / width;
+    const layerIndex = Math.floor(layerCount * (normalizedX + (Math.random() - 0.5) * 0.5));
+    const safeIndex = Math.max(0, Math.min(layerCount - 1, layerIndex));
+    
+    const layerCtx = layers[safeIndex].getContext('2d');
     layerCtx.fillStyle = `rgba(${pixelArr[i]}, ${pixelArr[i+1]}, ${pixelArr[i+2]}, ${pixelArr[i+3]/255})`;
-    layerCtx.fillRect(x, y, 1, 1);
+    // Draw 2x2 particles for better visibility
+    layerCtx.fillRect(x, y, 1.5, 1.5);
   }
 
-  // Hide real element and show dust
-  element.style.opacity = '0';
-  element.style.pointerEvents = 'none';
-  
-  layers.forEach((l, i) => {
-    document.body.appendChild(l);
+  setTimeout(() => {
+    // Hide real element
+    element.style.opacity = '0';
+    element.style.pointerEvents = 'none';
     
-    // Animate instantly (fast snap)
-    setTimeout(() => {
-      const angle = (Math.random() - 0.5) * 2 * Math.PI;
-      const drift = 50 + Math.random() * 100;
-      l.style.transform = `translate(${Math.cos(angle) * drift}px, ${Math.sin(angle) * drift - 50}px) rotate(${(Math.random() - 0.5) * 20}deg)`;
-      l.style.opacity = '0';
-      l.style.filter = 'blur(1px)';
-    }, i * 15); // Staggered for smoother effect but still fast
+    layers.forEach((l, i) => {
+      document.body.appendChild(l);
+      
+      // Force reflow
+      l.offsetWidth; 
+      
+      // 3. The "Ash" Drift Physics
+      // Stagger the start based on layer index (left-to-right sweep)
+      const delay = i * 25; 
+      setTimeout(() => {
+        const angle = (Math.random() - 0.5) * 0.5; // Slight drift angle
+        const driftX = 80 + Math.random() * 100;
+        const driftY = -60 - Math.random() * 50;
+        const rotate = (Math.random() - 0.5) * 30;
+        
+        l.style.transform = `translate(${driftX}px, ${driftY}px) rotate(${rotate}deg)`;
+        l.style.opacity = '0';
+        l.style.filter = 'blur(2px)';
+      }, delay);
 
-    setTimeout(() => {
-      l.remove();
-      if (i === layerCount - 1) element.style.display = 'none';
-    }, 1200);
-  });
+      // Cleanup
+      setTimeout(() => {
+        l.remove();
+        if (i === layerCount - 1) {
+          element.style.display = 'none';
+        }
+      }, 2000);
+    });
+  }, 300); // Wait for the initial "snap" jitter
 }
 
 function elementToCanvas(el) {
