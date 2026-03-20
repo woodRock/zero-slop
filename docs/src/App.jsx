@@ -74,7 +74,6 @@ function App() {
   };
 
   const getGlobalAudit = () => {
-    // Audit uses whatever is currently in state
     const masterEvents = [
       ...allDocs.map(d => ({ date: d.updateTime, score: d.fields.ai_score?.doubleValue || 0, handle: d.fields.author_handle?.stringValue })),
       ...allAccounts.map(d => ({ date: d.updateTime || d.createTime, score: 100, handle: d.fields.handle?.stringValue })),
@@ -128,18 +127,14 @@ function App() {
         count: t.count
       }));
 
-    const dailyVolume = {};
+    // Use pre-aggregated trendStats for the volume chart
+    const dailyVolume = [];
+    const today = new Date();
     for (let i = 0; i < 7; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      dailyVolume[d.toISOString().split('T')[0]] = 0;
+      const d = new Date(today); d.setDate(today.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      dailyVolume.push([dateStr, trendStats[dateStr] || 0]);
     }
-    recentEvents.forEach(event => {
-      if (event.date) {
-        const date = event.date.split('T')[0];
-        if (dailyVolume[date] !== undefined) dailyVolume[date]++;
-      }
-    });
 
     return {
       title: "Global State of the Feed",
@@ -148,7 +143,7 @@ function App() {
       totalSlops: recentEvents.length,
       topTrends: topTrends,
       topFactories: topFactories,
-      dailyVolume: Object.entries(dailyVolume).reverse()
+      dailyVolume: dailyVolume.reverse()
     };
   };
 
@@ -160,26 +155,21 @@ function App() {
         const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}`;
         const statsResponse = await fetch(statsUrl);
 
-        // Fetch ONLY the latest 5 items for the Wall of Shame (5 reads vs 1000)
         const recentRes = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=5&orderBy=last_updated desc&t=${Date.now()}`);
-
-        const trendsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends?key=${FIREBASE_CONFIG.apiKey}&pageSize=10`;
-        const trendsResponse = await fetch(trendsUrl);
-        
-        if (trendsResponse.ok) {
-          const trendsData = await trendsResponse.json();
-          const trendMap = {};
-          (trendsData.documents || []).forEach(doc => {
-            const dateStr = doc.name.split('/').pop();
-            trendMap[dateStr] = parseInt(doc.fields.count?.integerValue || 0);
-          });
-          setTrendStats(trendMap);
-        }
 
         if (statsResponse.ok) {
           const statsData = await statsResponse.json();
           const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || 0);
           const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || 0);
+          
+          // Load pre-aggregated daily stats
+          const dailyMap = statsData.fields.daily_stats?.mapValue?.fields || {};
+          const tMap = {};
+          Object.keys(dailyMap).forEach(date => {
+            tMap[date] = parseInt(dailyMap[date]?.integerValue || 0);
+          });
+          setTrendStats(tMap);
+
           setStats({ count: remoteTotal.toLocaleString(), accounts: remoteAccounts.toLocaleString(), rawCount: remoteTotal });
         }
 
@@ -196,19 +186,14 @@ function App() {
           setWallOfShame(recent);
         }
 
-        // Check if deep linked from extension
         const params = new URLSearchParams(window.location.search);
         const searchVal = params.get('search');
         if (searchVal) {
-          const handle = '@' + searchVal;
-          setSearchQuery(handle);
-          console.log("ZeroSlop: Fetching network map data...");
+          const handle = '@' + searchVal; setSearchQuery(handle);
           const [reg, acc, susp] = await Promise.all([fetchAllPages('slop_registry'), fetchAllPages('slop_accounts'), fetchAllPages('suspicious_accounts')]);
           setAllDocs(reg); setAllAccounts(acc); setAllSuspicious(susp);
-          const target = reg.find(d => (d.fields.author_handle?.stringValue || "").toLowerCase().replace('@','') === searchVal.toLowerCase());
           const realAmps = susp.filter(s => (s.fields.factory_handle?.stringValue || "").toLowerCase().replace('@','') === searchVal.toLowerCase());
-          setActiveMapHandle(handle);
-          setActiveMapAmplifiers(realAmps.map(s => ({ handle: s.fields.handle?.stringValue, type: "Caught Amplifying", rep: 10 })));
+          setActiveMapHandle(handle); setActiveMapAmplifiers(realAmps.map(s => ({ handle: s.fields.handle?.stringValue, type: "Caught Amplifying", rep: 10 })));
         }
       } catch (e) { console.error("ZeroSlop: Failed to fetch live stats", e); }
     };
@@ -220,47 +205,36 @@ function App() {
     setSearchQuery(query);
     if (!query) { setSearchResults([]); setActiveMapHandle(null); return; }
     
-    let currentDocs = allDocs; let currentAccounts = allAccounts; let currentSuspicious = allSuspicious;
     if (allDocs.length === 0) {
       const [reg, acc, susp] = await Promise.all([fetchAllPages('slop_registry'), fetchAllPages('slop_accounts'), fetchAllPages('suspicious_accounts')]);
       setAllDocs(reg); setAllAccounts(acc); setAllSuspicious(susp);
-      currentDocs = reg; currentAccounts = acc; currentSuspicious = susp;
     }
 
     const handleMap = {};
-    [...currentDocs, ...currentAccounts, ...currentSuspicious].forEach(doc => {
+    [...allDocs, ...allAccounts, ...allSuspicious].forEach(doc => {
       const handle = doc.fields.author_handle?.stringValue || doc.fields.handle?.stringValue;
       if (handle && handle.toLowerCase().includes(query.replace('@', ''))) {
         if (!handleMap[handle]) { handleMap[handle] = { handle, scores: [], count: 0 }; }
         const score = doc.fields.ai_score?.doubleValue || (doc.fields.manual_reports ? 100 : 50);
-        handleMap[handle].scores.push(score);
-        handleMap[handle].count++;
+        handleMap[handle].scores.push(score); handleMap[handle].count++;
       }
     });
 
     const results = Object.values(handleMap).map(res => ({
-      handle: res.handle,
-      score: Math.round(res.scores.reduce((a, b) => a + b, 0) / res.count),
-      count: res.count,
+      handle: res.handle, score: Math.round(res.scores.reduce((a, b) => a + b, 0) / res.count), count: res.count,
       label: res.count > 5 && Math.round(res.scores.reduce((a, b) => a + b, 0) / res.count) > 80 ? "Verified Slop Factory" : ""
     }));
     setSearchResults(results);
   };
 
   const getTrendsData = () => {
-    const days = {}; const today = new Date();
-    const allCurrentEvents = [...allDocs, ...allAccounts, ...allSuspicious];
-    const docCounts = {};
-    allCurrentEvents.forEach(doc => {
-      const dateStr = (doc.updateTime || doc.createTime)?.split('T')[0];
-      if (dateStr) docCounts[dateStr] = (docCounts[dateStr] || 0) + 1;
-    });
+    const days = []; const today = new Date();
     for (let i = 0; i < 7; i++) {
-      const date = new Date(today); date.setDate(today.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      days[dateStr] = Math.max(trendStats[dateStr] || 0, docCounts[dateStr] || 0);
+      const d = new Date(today); d.setDate(today.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      days.push([dateStr, trendStats[dateStr] || 0]);
     }
-    return Object.entries(days).reverse();
+    return days.reverse();
   };
 
   const trends = getTrendsData();

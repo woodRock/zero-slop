@@ -476,12 +476,13 @@ async function updateDailyTrend() {
   const dateStr = new Date().toISOString().split('T')[0];
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
 
+  // Store in the global stats document as a map for 1-read retrieval
   const body = {
     writes: [{
       transform: {
-        document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends/${dateStr}`,
+        document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global`,
         fieldTransforms: [{
-          fieldPath: "count",
+          fieldPath: `daily_stats.${dateStr}`,
           integerIncrement: { integerValue: 1 }
         }, {
           fieldPath: "last_updated",

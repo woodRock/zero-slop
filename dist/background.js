@@ -310,20 +310,50 @@ function incrementSlopsCaught() {
   });
 }
 
+// In-memory cache for the current session
+const registryCache = new Map();
+
 async function checkRegistry(tweetId) {
+  // 1. Check in-memory cache first
+  if (registryCache.has(tweetId)) {
+    return registryCache.get(tweetId);
+  }
+
+  // 2. Check chrome storage (persistent across restarts)
+  const storageKey = `cache_${tweetId}`;
+  const stored = await chrome.storage.local.get([storageKey]);
+  if (stored[storageKey]) {
+    const cached = stored[storageKey];
+    // Cache for 24 hours
+    if (Date.now() - cached.timestamp < 24 * 60 * 60 * 1000) {
+      registryCache.set(tweetId, cached.data);
+      return cached.data;
+    }
+  }
+
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
+
   try {
     const response = await fetch(url);
     if (response.ok) {
       const doc = await response.json();
       const fields = doc.fields;
-      return {
+      const result = {
         ai_score: fields.ai_score?.doubleValue || fields.ai_score?.integerValue || 0,
         status: fields.status?.stringValue,
         upvotes: parseInt(fields.upvotes?.integerValue || 0),
         downvotes: parseInt(fields.downvotes?.integerValue || 0),
         author_handle: fields.author_handle?.stringValue
       };
+
+      // Store in cache
+      registryCache.set(tweetId, result);
+      chrome.storage.local.set({ [storageKey]: { data: result, timestamp: Date.now() } });
+
+      return result;
+    } else {
+      // If not found, cache the "null" result for 1 hour to prevent re-checking human tweets constantly
+      chrome.storage.local.set({ [storageKey]: { data: null, timestamp: Date.now() - (23 * 60 * 60 * 1000) } });
     }
   } catch (e) {}
   return null;
@@ -446,12 +476,13 @@ async function updateDailyTrend() {
   const dateStr = new Date().toISOString().split('T')[0];
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
 
+  // Store in the global stats document as a map for 1-read retrieval
   const body = {
     writes: [{
       transform: {
-        document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/trends/${dateStr}`,
+        document: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global`,
         fieldTransforms: [{
-          fieldPath: "count",
+          fieldPath: `daily_stats.${dateStr}`,
           integerIncrement: { integerValue: 1 }
         }, {
           fieldPath: "last_updated",
