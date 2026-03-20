@@ -1,81 +1,53 @@
-# ZeroSlop: The Community-Powered AI Detection Shield 🛡️✨
+# ZeroSlop: A Community-Powered Shield for X (Twitter)
 
-[![Chrome Web Store Version](https://img.shields.io/chrome-web-store/v/enlimjkhkfbhcoebopkklafhakhehiab?style=for-the-badge&logo=google-chrome&logoColor=white)](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab)
-[![Chrome Web Store Users](https://img.shields.io/chrome-web-store/users/enlimjkhkfbhcoebopkklafhakhehiab?style=for-the-badge&color=green)](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab)
-<a href="https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab">
-  <img src="https://raw.githubusercontent.com/GoogleChrome/webstore-docs/master/images/ChromeWebStore_Badge_v2_206x58.png" alt="Available in the Chrome Web Store" height="58">
-</a>
+ZeroSlop is an open-source browser extension and forensic platform designed to protect the human web from industrial-scale engagement farming and AI-generated "slop." 
 
-![ZeroSlop Hero](docs/public/banner.jpg)
+In 2026, the algorithm doesn't just feed you; it harvests you. ZeroSlop gives you the tools to fight back, identifying the extraction funnels and bot networks that pollute your timeline.
 
-**ZeroSlop** is an open-source Chrome extension designed to identify and expose AI-generated "slop" on Twitter (X). Built with a community-first ethos, it turns detection into a collective effort to keep the timeline human.
+## 🛡️ The Three-Shield System
 
-[**Add to Chrome**](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab?utm_source=item-share-cb) | [**Official Website**](https://woodrock.github.io/zero-slop/)
+ZeroSlop goes beyond binary AI detection. We categorize accounts based on their **intent** and **mechanics**:
 
----
+- 🚩 **RED SHIELD: SLOP FACTORY**: Industrial engagement farms using coordinated bot networks and deceptive funnels (e.g., "N prompts to $10k") to capture your attention for monetization.
+- 🔵 **BLUE SHIELD: HIGH AI USAGE**: Accounts that produce high-volume AI output but lack coordinated bot amplification or deceptive extraction hooks.
+- ⚠️ **ORANGE SHIELD: SUSPICIOUS**: The "Faceless Army"—bot accounts caught retweeting, quoting, or amplifying confirmed Slop Factories.
 
 ## 🚀 Key Features
 
-### 🧠 Community-Driven Registry
-ZeroSlop is like **SponsorBlock for AI**. When one user scans a tweet, the result is saved to our shared community registry. As you scroll, AI score badges appear instantly for any tweet previously identified by the community.
+### 🕵️ Bounty Hunter Vision
+- **Heuristic Highlighting**: Real-time, local scanning that highlights "Extraction Hooks" (Thread 🧵, "Save for later," "$0 to $10k") in red ink directly on your timeline.
+- **Precision Reporting**: A multi-dimensional reporting drawer that lets you categorize slop types and perform the "Extraction Test" (Accountability, Funnel, Replicability).
 
-### 🧵 Specialized Scans
-*   **Thread Detection:** Analyze entire conversational threads as a single block for maximum accuracy.
-*   **Profile Analysis:** Expose "Slop Factories" by scanning an account's recent timeline activity collectively.
+### 🫰 Cinematic 'Zap' Mode
+- Choose to **Blur** or **Zap** slop from your timeline.
+- **The Snap**: When set to Zap, slop tweets disintegrate into ash with a cinematic horizontal-sweep "Thanos Snap" animation before being physically removed from the DOM.
 
-### 🛡️ Auto-Hide Slop
-Tired of seeing bot replies? Enable **Auto-Hide** in your settings to automatically blur out any tweet that scores above your personal AI threshold.
+### 🕸️ Forensic Slop Maps
+- Deep-link from any **Red Shield** banner to the [ZeroSlop Registry](https://woodrock.github.io/zero-slop) to visualize the coordinated bot network behind the factory.
+- Identify the connections between gurus and their synthetic amplification armies.
 
-### 🖼️ Wanted Posters
-Expose the slop-posters with style. Generate a custom, high-impact "WANTED" poster for any detected slop and copy it to your clipboard with one click.
+### 🧠 Community Registry & Analytics
+- **Proof of Work**: Every report is verified by the community via 👍/👎 voting.
+- **Daily Trends**: Track the global slop volume and the most active Slop Factories in real-time.
+- **Research Access**: Our community-curated dataset is available for academic research to help build the next generation of AI safety tools.
 
----
+## 🛠️ Technical Overview
 
-## 📸 See it in Action
-
-### Instant Detection & Community Badges
-![Detection Overlay](docs/public/zero-slop-result.png)
-*Identify AI probability scores directly on your timeline.*
-
-### Seamless Integration
-![Context Menu](docs/public/zero-slop-right-click.png)
-*Right-click any tweet, thread, or profile to start hunting.*
-
----
-
-## 🛠️ How it Works
-
-ZeroSlop combines the **ZeroGPT Business API** with a high-performance **Firestore Registry** to provide real-time protection.
-
-![Architecture Diagram](docs/public/architecture-diagram.jpeg)
-
----
+ZeroSlop is built for performance and privacy:
+- **ZeroGPT Business API**: Official, high-accuracy neural curvature analysis.
+- **Firestore Commit API**: Robust, atomic concurrency handling for global statistics and voting.
+- **Local Caching**: Reduces database reads by 90%, ensuring a smooth, low-latency browsing experience.
+- **Privacy First**: Your API keys and browsing data stay in your local storage.
 
 ## 📥 Installation
 
-Simply add ZeroSlop to your browser from the Chrome Web Store:
-
-[**Add to Chrome**](https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab?utm_source=item-share-cb)
-
----
-
-## 🔑 Configuration (Optional)
-
-To perform new scans, you can add your own **ZeroGPT Business API Key**:
-
-1. [**Get an API Key from ZeroGPT**](https://zerogpt.com) (Purchase credits as needed).
-2. Open the ZeroSlop extension popup.
-3. Paste your key into the **API Key** field and click **Save**.
-
-*Note: Previously scanned tweets are cached in our Firestore Registry and can be viewed by all users for free.*
+1. Clone this repository.
+2. Open Chrome and go to `chrome://extensions/`.
+3. Enable **Developer mode**.
+4. Click **Load unpacked** and select this folder.
+5. (Coming Soon) Available on the Chrome Web Store.
 
 ---
 
-## 🪙 ZeroSlop Coin (CA)
-Support the mission to clean up the timeline:
-`CNuZoaZkeVTkcqxeXdeDWKcx9217AgvuqQz9xv5dpump`
-
----
-
-## ⚖️ License
-ZeroSlop is open-source and free forever. Built for a cleaner, more human internet. 🛡️✨
+Keep the timeline human. **Join the hunt.** 🕵️🛡️🚩
+[github.com/woodrock/zero-slop](https://github.com/woodrock/zero-slop)
