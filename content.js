@@ -10,6 +10,8 @@ let currentOverlayInfo = null;
 
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log(`ZeroSlop: Received action ${request.action}`);
+  
   if (request.action === "getTweetText") {
     const info = extractTweetInfo(lastRightClickedElement);
     sendResponse(info);
@@ -422,14 +424,14 @@ function getTweetContainer(element) {
 
 function extractTweetInfo(element) {
   const container = getTweetContainer(element);
-  let text = null;
-  let tweetId = null;
-  let author = { name: null, handle: null, pfp: null };
+  let text = "";
+  let tweetId = "local-" + Date.now();
+  let author = { name: "Unknown", handle: "@anonymous", pfp: "" };
   
   if (container) {
     const tweetTextDiv = container.querySelector('[data-testid="tweetText"]');
     if (tweetTextDiv) {
-      text = tweetTextDiv.innerText || tweetTextDiv.textContent;
+      text = tweetTextDiv.innerText || tweetTextDiv.textContent || "";
     }
 
     const timeLink = container.querySelector('time')?.parentElement;
@@ -456,21 +458,15 @@ function extractTweetInfo(element) {
                   container.querySelector('img[src*="profile_images"]');
     if (pfpEl) author.pfp = pfpEl.src;
 
-    if (!tweetId) {
-      if (!container.dataset.zerogptId) {
-        container.dataset.zerogptId = 'local-' + Math.random().toString(36).substr(2, 9);
-      }
-      tweetId = container.dataset.zerogptId;
-    }
-
     return { text, tweetId, author };
   }
 
+  // Fallback for non-container elements
   const nearbyText = element ? element.closest('[data-testid="tweetText"]') : null;
   if (nearbyText) {
-    text = nearbyText.innerText || nearbyText.textContent;
+    text = nearbyText.innerText || nearbyText.textContent || "";
   }
-  return { text, tweetId: null, author: null };
+  return { text, tweetId, author };
 }
 
 function extractThreadInfo(element) {
@@ -1107,108 +1103,113 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
     btnContainer.style.flexDirection = 'column';
     btnContainer.style.gap = '8px';
     btnContainer.style.marginTop = '15px';
-    const info = currentOverlayInfo || extractTweetInfo(lastRightClickedElement);
-    if (!message.includes('Reported')) {
-      let suggestedType = "";
-      if (info?.text) {
-        const text = info.text.toLowerCase();
-        if (text.includes('thread') || text.includes('🧵')) suggestedType = "type1";
-        else if (text.includes('passive income') || text.includes('faceless')) suggestedType = "type2";
-        else if (text.includes('my cousin') || text.includes('replies in')) suggestedType = "type3";
+    
+    try {
+      const info = currentOverlayInfo || extractTweetInfo(lastRightClickedElement);
+      if (!message.includes('Reported')) {
+        let suggestedType = "";
+        if (info?.text) {
+          const text = info.text.toLowerCase();
+          if (text.includes('thread') || text.includes('🧵')) suggestedType = "type1";
+          else if (text.includes('passive income') || text.includes('faceless')) suggestedType = "type2";
+          else if (text.includes('my cousin') || text.includes('replies in')) suggestedType = "type3";
+        }
+        const reportBtn = document.createElement('button');
+        reportBtn.innerText = '🚩 Report as AI Slop';
+        reportBtn.style.cssText = `background: #f4212e; color: white; border: none; padding: 12px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.95rem;`;
+        const detailsDrawer = document.createElement('div');
+        detailsDrawer.style.cssText = `display: none; background: #f7f9f9; border-radius: 12px; padding: 12px; border: 1px solid #e1e8ed; margin-top: 5px;`;
+        const toggleDetails = document.createElement('div');
+        toggleDetails.innerText = "Add Details (Optional) ▾";
+        toggleDetails.style.cssText = "font-size: 0.75rem; color: #536471; cursor: pointer; text-align: center; margin-top: 4px; text-decoration: underline;";
+        toggleDetails.onclick = () => {
+          detailsDrawer.style.display = detailsDrawer.style.display === 'none' ? 'block' : 'none';
+          toggleDetails.innerText = detailsDrawer.style.display === 'none' ? "Add Details (Optional) ▾" : "Hide Details ▴";
+        };
+        const slopSelect = document.createElement('select');
+        slopSelect.style.cssText = "width: 100%; padding: 5px; border-radius: 6px; border: 1px solid #cfd9de; font-size: 0.8rem; margin-bottom: 10px;";
+        const defaultOpt = document.createElement('option');
+        defaultOpt.value = ""; defaultOpt.text = "General Slop";
+        slopSelect.appendChild(defaultOpt);
+        SLOP_TYPES.forEach(t => {
+          const opt = document.createElement('option');
+          opt.value = t.id; opt.text = `${t.emoji} ${t.name}`;
+          if (t.id === suggestedType) opt.selected = true;
+          slopSelect.appendChild(opt);
+        });
+        detailsDrawer.appendChild(slopSelect);
+        const createCheck = (id, label) => {
+          const div = document.createElement('label');
+          div.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 0.75rem; margin-bottom: 4px; cursor: pointer;";
+          const cb = document.createElement('input');
+          cb.type = 'checkbox'; cb.id = id;
+          div.appendChild(cb); div.appendChild(document.createTextNode(label));
+          return { div, cb };
+        };
+        const check1 = createCheck('chk-acc', 'No accountable author');
+        const check2 = createCheck('chk-fun', 'Contains funnel/CTA');
+        const check3 = createCheck('chk-rep', 'Not replicable/Fake');
+        detailsDrawer.appendChild(check1.div);
+        detailsDrawer.appendChild(check2.div);
+        detailsDrawer.appendChild(check3.div);
+        const shieldLabel = document.createElement('div');
+        shieldLabel.innerText = "Shield Type (Optional):";
+        shieldLabel.style.cssText = "font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; color: #536471; margin-top: 8px;";
+        detailsDrawer.appendChild(shieldLabel);
+        const shieldContainer = document.createElement('div');
+        shieldContainer.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;";
+        const createShieldOption = (id, label, color) => {
+          const div = document.createElement('label');
+          div.style.cssText = `display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; color: ${color}; font-weight: bold;`;
+          const radio = document.createElement('input');
+          radio.type = 'radio'; radio.name = 'shield-type'; radio.id = id; radio.value = id;
+          div.appendChild(radio); div.appendChild(document.createTextNode(label));
+          return { div, radio };
+        };
+        const optRed = createShieldOption('shield-red', '🚩 RED: Slop Factory', '#f4212e');
+        const optBlue = createShieldOption('shield-blue', '🔵 BLUE: High AI Usage', '#1d9bf0');
+        const optNone = createShieldOption('shield-none', '⚪ None (General Slop)', '#71767b');
+        optNone.radio.checked = true;
+        shieldContainer.appendChild(optRed.div);
+        shieldContainer.appendChild(optBlue.div);
+        shieldContainer.appendChild(optNone.div);
+        detailsDrawer.appendChild(shieldContainer);
+        reportBtn.onclick = () => {
+          if (info) {
+            const selectedShield = detailsDrawer.querySelector('input[name="shield-type"]:checked').value;
+            chrome.runtime.sendMessage({
+              action: "manualReport",
+              aiScore: currentAiScore,
+              slopType: slopSelect.value,
+              extractionResults: { accountability: check1.cb.checked, funnel: check2.cb.checked, replicability: check3.cb.checked },
+              shieldType: selectedShield,
+              ...info
+            });
+            reportBtn.innerText = '✅ Reported to Registry';
+            reportBtn.style.background = '#00ba7c';
+            reportBtn.disabled = true; toggleDetails.remove(); detailsDrawer.remove();
+          }
+        };
+        btnContainer.appendChild(toggleDetails);
+        btnContainer.appendChild(detailsDrawer);
+        btnContainer.appendChild(reportBtn);
       }
-      const reportBtn = document.createElement('button');
-      reportBtn.innerText = '🚩 Report as AI Slop';
-      reportBtn.style.cssText = `background: #f4212e; color: white; border: none; padding: 12px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.95rem;`;
-      const detailsDrawer = document.createElement('div');
-      detailsDrawer.style.cssText = `display: none; background: #f7f9f9; border-radius: 12px; padding: 12px; border: 1px solid #e1e8ed; margin-top: 5px;`;
-      const toggleDetails = document.createElement('div');
-      toggleDetails.innerText = "Add Details (Optional) ▾";
-      toggleDetails.style.cssText = "font-size: 0.75rem; color: #536471; cursor: pointer; text-align: center; margin-top: 4px; text-decoration: underline;";
-      toggleDetails.onclick = () => {
-        detailsDrawer.style.display = detailsDrawer.style.display === 'none' ? 'block' : 'none';
-        toggleDetails.innerText = detailsDrawer.style.display === 'none' ? "Add Details (Optional) ▾" : "Hide Details ▴";
-      };
-      const slopSelect = document.createElement('select');
-      slopSelect.style.cssText = "width: 100%; padding: 5px; border-radius: 6px; border: 1px solid #cfd9de; font-size: 0.8rem; margin-bottom: 10px;";
-      const defaultOpt = document.createElement('option');
-      defaultOpt.value = ""; defaultOpt.text = "General Slop";
-      slopSelect.appendChild(defaultOpt);
-      SLOP_TYPES.forEach(t => {
-        const opt = document.createElement('option');
-        opt.value = t.id; opt.text = `${t.emoji} ${t.name}`;
-        if (t.id === suggestedType) opt.selected = true;
-        slopSelect.appendChild(opt);
-      });
-      detailsDrawer.appendChild(slopSelect);
-      const createCheck = (id, label) => {
-        const div = document.createElement('label');
-        div.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 0.75rem; margin-bottom: 4px; cursor: pointer;";
-        const cb = document.createElement('input');
-        cb.type = 'checkbox'; cb.id = id;
-        div.appendChild(cb); div.appendChild(document.createTextNode(label));
-        return { div, cb };
-      };
-      const check1 = createCheck('chk-acc', 'No accountable author');
-      const check2 = createCheck('chk-fun', 'Contains funnel/CTA');
-      const check3 = createCheck('chk-rep', 'Not replicable/Fake');
-      detailsDrawer.appendChild(check1.div);
-      detailsDrawer.appendChild(check2.div);
-      detailsDrawer.appendChild(check3.div);
-      const shieldLabel = document.createElement('div');
-      shieldLabel.innerText = "Shield Type (Optional):";
-      shieldLabel.style.cssText = "font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; color: #536471; margin-top: 8px;";
-      detailsDrawer.appendChild(shieldLabel);
-      const shieldContainer = document.createElement('div');
-      shieldContainer.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;";
-      const createShieldOption = (id, label, color) => {
-        const div = document.createElement('label');
-        div.style.cssText = `display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; color: ${color}; font-weight: bold;`;
-        const radio = document.createElement('input');
-        radio.type = 'radio'; radio.name = 'shield-type'; radio.id = id; radio.value = id;
-        div.appendChild(radio); div.appendChild(document.createTextNode(label));
-        return { div, radio };
-      };
-      const optRed = createShieldOption('shield-red', '🚩 RED: Slop Factory', '#f4212e');
-      const optBlue = createShieldOption('shield-blue', '🔵 BLUE: High AI Usage', '#1d9bf0');
-      const optNone = createShieldOption('shield-none', '⚪ None (General Slop)', '#71767b');
-      optNone.radio.checked = true;
-      shieldContainer.appendChild(optRed.div);
-      shieldContainer.appendChild(optBlue.div);
-      shieldContainer.appendChild(optNone.div);
-      detailsDrawer.appendChild(shieldContainer);
-      reportBtn.onclick = () => {
-        if (info) {
-          const selectedShield = detailsDrawer.querySelector('input[name="shield-type"]:checked').value;
-          chrome.runtime.sendMessage({
-            action: "manualReport",
-            aiScore: currentAiScore,
-            slopType: slopSelect.value,
-            extractionResults: { accountability: check1.cb.checked, funnel: check2.cb.checked, replicability: check3.cb.checked },
-            shieldType: selectedShield,
-            ...info
+      const posterBtn = document.createElement('button');
+      posterBtn.innerText = '🖼️ Generate Wanted Poster';
+      posterBtn.style.cssText = `background: #1d9bf0; color: white; border: none; padding: 10px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.9rem;`;
+      posterBtn.onclick = () => {
+        if (info && info.author) {
+          posterBtn.innerText = '⌛ Generating...';
+          generateWantedPoster(info.author, currentAiScore).then(() => {
+            posterBtn.innerText = '📋 Copied to Clipboard!';
+            setTimeout(() => posterBtn.innerText = '🖼️ Generate Wanted Poster', 3000);
           });
-          reportBtn.innerText = '✅ Reported to Registry';
-          reportBtn.style.background = '#00ba7c';
-          reportBtn.disabled = true; toggleDetails.remove(); detailsDrawer.remove();
         }
       };
-      btnContainer.appendChild(toggleDetails);
-      btnContainer.appendChild(detailsDrawer);
-      btnContainer.appendChild(reportBtn);
+      btnContainer.appendChild(posterBtn);
+    } catch (e) {
+      console.error("ZeroSlop: Error building overlay buttons", e);
     }
-    const posterBtn = document.createElement('button');
-    posterBtn.innerText = '🖼️ Generate Wanted Poster';
-    posterBtn.style.cssText = `background: #1d9bf0; color: white; border: none; padding: 10px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.9rem;`;
-    posterBtn.onclick = () => {
-      if (info && info.author) {
-        posterBtn.innerText = '⌛ Generating...';
-        generateWantedPoster(info.author, currentAiScore).then(() => {
-          posterBtn.innerText = '📋 Copied to Clipboard!';
-          setTimeout(() => posterBtn.innerText = '🖼️ Generate Wanted Poster', 3000);
-        });
-      }
-    };
-    btnContainer.appendChild(posterBtn);
     overlay.appendChild(btnContainer);
   }
   const closeBtn = document.createElement('button');
