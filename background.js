@@ -525,11 +525,17 @@ async function updateGlobalStats(fieldName = 'total_slops') {
   };
 
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
+    if (response.ok) {
+      console.log(`ZeroSlop: Atomically updated global stats: ${fieldName}`);
+    } else {
+      const err = await response.text();
+      console.error(`ZeroSlop: Global stats update failed: ${err}`);
+    }
   } catch (e) {
     console.error(`ZeroSlop: Error updating global stats for ${fieldName} (atomic)`, e);
   }

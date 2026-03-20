@@ -80,8 +80,6 @@ function App() {
       ...allSuspicious.map(d => ({ date: d.updateTime || d.createTime, score: 50, handle: d.fields.handle?.stringValue }))
     ];
 
-    if (masterEvents.length === 0) return null;
-
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
@@ -139,7 +137,9 @@ function App() {
     return {
       title: "Global State of the Feed",
       date: `Week of ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`,
-      summary: `Our global registry analysis for the past 7 days shows ${recentEvents.length} total slop events detected.`,
+      summary: masterEvents.length > 0 
+        ? `Our global registry analysis for the past 7 days shows ${recentEvents.length} total slop events detected.`
+        : "Registry analysis complete. No slop events detected in this window.",
       totalSlops: recentEvents.length,
       topTrends: topTrends,
       topFactories: topFactories,
@@ -159,18 +159,23 @@ function App() {
 
         if (statsResponse.ok) {
           const statsData = await statsResponse.json();
-          const remoteTotal = parseInt(statsData.fields.total_slops?.integerValue || statsData.fields.total_slops?.doubleValue || 0);
-          const remoteAccounts = parseInt(statsData.fields.total_accounts?.integerValue || statsData.fields.total_accounts?.doubleValue || 0);
+          const fields = statsData.fields || {};
+          const remoteTotal = parseInt(fields.total_slops?.integerValue || fields.total_slops?.doubleValue || 0);
+          const remoteAccounts = parseInt(fields.total_accounts?.integerValue || fields.total_accounts?.doubleValue || 0);
           
-          // Load pre-aggregated daily stats
-          const dailyMap = statsData.fields.daily_stats?.mapValue?.fields || {};
+          // Load pre-aggregated daily stats safely
+          const dailyMap = fields.daily_stats?.mapValue?.fields || {};
           const tMap = {};
           Object.keys(dailyMap).forEach(date => {
             tMap[date] = parseInt(dailyMap[date]?.integerValue || dailyMap[date]?.doubleValue || 0);
           });
           setTrendStats(tMap);
 
-          setStats({ count: remoteTotal.toLocaleString(), accounts: remoteAccounts.toLocaleString(), rawCount: remoteTotal });
+          setStats({ 
+            count: remoteTotal.toLocaleString(), 
+            accounts: remoteAccounts.toLocaleString(), 
+            rawCount: remoteTotal 
+          });
         }
 
         if (recentRes.ok) {
