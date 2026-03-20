@@ -525,18 +525,24 @@ async function updateGlobalStats(fieldName = 'total_slops') {
   };
 
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
+    if (response.ok) {
+      console.log(`ZeroSlop: Atomically updated global stats: ${fieldName}`);
+    } else {
+      const err = await response.text();
+      console.error(`ZeroSlop: Global stats update failed: ${err}`);
+    }
   } catch (e) {
     console.error(`ZeroSlop: Error updating global stats for ${fieldName} (atomic)`, e);
   }
 }
 
 async function storeSlopTweet(tweetId, text, percentage, author, isManual = false, slopType = null, extractionResults = null) {
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
   
   const fields = {
     tweet_id: { stringValue: tweetId },
@@ -571,49 +577,44 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     if (author.name) fields.author_name = { stringValue: author.name };
     if (author.handle) fields.author_handle = { stringValue: author.handle };
     if (author.pfp) fields.author_pfp = { stringValue: author.pfp };
-
-    // Track unique accounts if it's slop
-    if (author.handle && isSlop) {
-      const accountId = author.handle.replace('@', '').toLowerCase();
-      const accountUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
-      
-      try {
-        const accCheck = await fetch(accountUrl);
-        if (!accCheck.ok) {
-          // New slop factory detected!
-          await fetch(accountUrl, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              fields: {
-                handle: { stringValue: author.handle },
-                name: { stringValue: author.name || "" },
-                pfp: { stringValue: author.pfp || "" },
-                first_detected: { timestampValue: new Date().toISOString() }
-              }
-            })
-          });
-          updateGlobalStats('total_accounts');
-        }
-      } catch (e) {
-        console.error("ZeroSlop: Error tracking account:", e);
-      }
-    }
   }
 
-  let maskParams = "";
-  Object.keys(fields).forEach(key => {
-    maskParams += `&updateMask.fieldPaths=${key}`;
-  });
+  // Use Commit API for robust UPSERT
+  const body = {
+    writes: [{
+      update: {
+        name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}`,
+        fields: fields
+      }
+    }]
+  };
 
   try {
-    await fetch(url + maskParams, {
-      method: "PATCH",
+    const response = await fetch(commitUrl, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields })
+      body: JSON.stringify(body)
     });
+    
+    if (response.ok) {
+      console.log(`ZeroSlop: Successfully stored slop tweet ${tweetId}`);
+      
+      // Track unique accounts if it's slop
+      if (author && author.handle && isSlop) {
+        const accountId = author.handle.replace('@', '').toLowerCase();
+        // Check and report account if new
+        checkSlopAccount(author.handle).then(data => {
+          if (!data) {
+            storeSlopFactoryReport(author, 'shield-none'); // Record discovery
+          }
+        });
+      }
+    } else {
+      const err = await response.text();
+      console.error(`ZeroSlop: Commit failed for tweet: ${err}`);
+    }
   } catch (e) {
-    console.error("ZeroSlop: Firestore error:", e);
+    console.error("ZeroSlop: Network error during commit:", e);
   }
 }
 
@@ -688,7 +689,7 @@ function saveToHistory(text, percentage, words) {
 
 async function storeSuspiciousAccount(handle, name, pfp, tweetId, factoryHandle = null) {
   const accountId = handle.replace('@', '').toLowerCase();
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
 
   // Every bot amplifier is a slop detection event
   updateGlobalStats('total_slops');
@@ -706,12 +707,27 @@ async function storeSuspiciousAccount(handle, name, pfp, tweetId, factoryHandle 
     fields.factory_handle = { stringValue: factoryHandle };
   }
 
+  const body = {
+    writes: [{
+      update: {
+        name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}`,
+        fields: fields
+      }
+    }]
+  };
+
   try {
-    await fetch(url, {
-      method: "PATCH",
+    const response = await fetch(commitUrl, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields })
+      body: JSON.stringify(body)
     });
+    if (response.ok) {
+      console.log(`ZeroSlop: Successfully stored suspicious account ${handle}`);
+    } else {
+      const err = await response.text();
+      console.error(`ZeroSlop: Commit failed for suspicious: ${err}`);
+    }
   } catch (e) {
     console.error("ZeroSlop: Error storing suspicious account", e);
   }
