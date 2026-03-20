@@ -1237,6 +1237,7 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
 
 initObservers();
 autoScanAmplifiers();
+console.log("ZeroSlop: Content script v1.3.10 initialized.");
 
 if (!document.getElementById('zerogpt-styles')) {
   const style = document.createElement('style');
