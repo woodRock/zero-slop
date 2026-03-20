@@ -1149,9 +1149,23 @@ if (!document.getElementById('zerogpt-styles')) {
       to { transform: translateX(0); opacity: 1; }
     }
     @keyframes zerogptSnap {
-      0% { transform: scale(1); filter: blur(0); opacity: 1; }
-      25% { transform: scale(1.02) rotate(0.5deg); filter: blur(1px); }
-      100% { transform: scale(0.8) translateY(-20px) rotate(-2deg); filter: blur(20px); opacity: 0; }
+      0% { 
+        filter: blur(0) brightness(1); 
+        transform: scale(1);
+      }
+      10% { 
+        filter: blur(1px) brightness(1.2); 
+        transform: translateX(-2px) rotate(-0.5deg);
+      }
+      20% {
+        filter: blur(2px) brightness(1.5);
+        transform: translateX(2px) rotate(0.5deg);
+      }
+      100% { 
+        filter: blur(20px) brightness(0.8) sepia(1) contrast(1.2) hue-rotate(-30deg);
+        transform: scale(0.9) translate(150px, -60px) rotate(-10deg) skew(20deg);
+        opacity: 0;
+      }
     }
   `;
   document.head.appendChild(style);
