@@ -733,8 +733,41 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
   handleAutoAction(container, percentage);
 }
 
-function initObservers() {
+function injectLikelyHumanBadge(container, labelText = "LIKELY HUMAN", bgColor = "#00ba7c") {
+  if (!container || container.querySelector('.zerogpt-likely-human-badge') || container.querySelector('.zerogpt-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-likely-human-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    background-color: ${bgColor};
+    border: 1px solid rgba(255,255,255,0.2);
+    vertical-align: middle;
+    line-height: 1;
+    height: 16px;
+    cursor: help;
+  `;
+  badge.innerHTML = (labelText.includes('HUMAN') ? '🌿 ' : '🔵 ') + labelText;
+  badge.title = `Local AI Classifier: High-confidence ${labelText.toLowerCase()} content.`;
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
+
+async function initObservers() {
   if (window.zerogptObserver) window.zerogptObserver.disconnect();
+  
+  // Initialize local classifier
+  await ZeroSlopClassifier.load();
 
   const checkContext = () => {
     const path = window.location.pathname;
@@ -776,6 +809,25 @@ function initObservers() {
           container.dataset.zerogptChecked = "true";
           highlightSlopMarkers(container);
           const info = extractTweetInfo(container);
+          
+          // Local Prediction for Automatic Badging
+          if (info.text && info.text.length > 20) {
+            const prediction = ZeroSlopClassifier.predict(info.text);
+            if (prediction) {
+              const { label, probability, probabilities } = prediction;
+              
+              if (label === 'organic-human') {
+                if (probability > 0.95) {
+                  injectLikelyHumanBadge(container, "VERIFIED HUMAN", "#00ba7c");
+                } else if (probability > 0.80) {
+                  injectLikelyHumanBadge(container, "LIKELY HUMAN", "rgba(0, 186, 124, 0.7)");
+                }
+              } else if (label === 'ai-generated' && probability > 0.90) {
+                injectLikelyHumanBadge(container, "HIGH AI PROBABILITY", "#1d9bf0");
+              }
+            }
+          }
+
           if (info.tweetId && !info.tweetId.startsWith('local-')) {
             chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
             chrome.storage.local.get(['autoScan'], (result) => {

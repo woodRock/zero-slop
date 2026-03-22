@@ -36,7 +36,13 @@
         "https://twitter.com/*",
         "https://x.com/*"
       ],
-      "js": ["content.js"]
+      "js": ["classifier.js", "content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["model_weights.json"],
+      "matches": ["https://twitter.com/*", "https://x.com/*"]
     }
   ]
 }
