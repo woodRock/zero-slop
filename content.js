@@ -81,6 +81,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         injectHighAIBadge(article, request.handle);
       }
     });
+  } else if (request.action === "showOrganicSuccess") {
+    injectOrganicBanner(request.handle);
+    injectOrganicHeaderBadge(request.handle);
+    const articles = document.querySelectorAll('article');
+    articles.forEach(article => {
+      const info = extractTweetInfo(article);
+      if (info.author?.handle === request.handle) {
+        injectOrganicBadge(article, request.handle);
+      }
+    });
   }
   return true; 
 });
@@ -292,6 +302,116 @@ function injectHighAIBadge(container, handle) {
     cursor: help;
   `;
   badge.innerHTML = `🔵 BLUE SHIELD: HIGH AI <span class="v-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
+
+  badge.querySelector('.v-up').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
+    badge.querySelector('.v-up').innerText = '✅';
+  };
+  badge.querySelector('.v-down').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
+    badge.querySelector('.v-down').innerText = '❌';
+  };
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
+
+function injectOrganicBanner(handle) {
+  const existing = document.getElementById('zerogpt-organic-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'zerogpt-organic-banner';
+  banner.style.cssText = `
+    background: #00ba7c;
+    color: #fff;
+    padding: 12px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 9999;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+  `;
+  banner.innerHTML = `
+    <span>🌿 GREEN SHIELD: VERIFIED HUMAN (${handle})</span>
+    <button id="close-organic-banner" style="background: rgba(255,255,255,0.2); border: none; color: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Dismiss</button>
+  `;
+
+  document.body.prepend(banner);
+  banner.querySelector('#close-organic-banner').onclick = () => banner.remove();
+}
+
+function injectOrganicHeaderBadge(handle) {
+  const userNameHeader = document.querySelector('[data-testid="UserName"]');
+  if (!userNameHeader || userNameHeader.querySelector('.zerogpt-organic-header-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-organic-header-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    margin-top: 4px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #000;
+    border: 2px solid #00ba7c;
+    cursor: help;
+  `;
+  badge.innerHTML = `🌿 GREEN SHIELD: HUMAN <span class="v-up" style="cursor:pointer;margin-left:8px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:4px;">👎</span>`;
+  
+  badge.querySelector('.v-up').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
+    badge.querySelector('.v-up').innerText = '✅';
+  };
+  badge.querySelector('.v-down').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
+    badge.querySelector('.v-down').innerText = '❌';
+  };
+
+  userNameHeader.appendChild(badge);
+}
+
+function injectOrganicBadge(container, handle) {
+  if (!container || container.querySelector('.zerogpt-organic-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-organic-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #000;
+    border: 1px solid #00ba7c;
+    vertical-align: middle;
+    line-height: 1;
+    height: 16px;
+    cursor: help;
+  `;
+  badge.innerHTML = `🌿 GREEN SHIELD: HUMAN <span class="v-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
 
   badge.querySelector('.v-up').onclick = (e) => {
     e.stopPropagation();
@@ -886,30 +1006,103 @@ async function generateWantedPoster(author, percentage) {
 }
 
 const SLOP_TYPES = [
-  { id: 'type1', name: 'Type 1: Prompt-List Hustle', emoji: '🧵' },
-  { id: 'type2', name: 'Type 2: Passive Income Pitch', emoji: '💰' },
-  { id: 'type3', name: 'Type 3: Social Proof Fabrication', emoji: '🧪' },
-  { id: 'type4', name: 'Type 4: Evergreen Re-publisher', emoji: '🔄' },
-  { id: 'type5', name: 'Type 5: Personal Transformation', emoji: '🦋' },
-];
+  { 
+    id: 'type_psych_burnout', 
+    name: 'Burnout Exploit ($10k/mo)', 
+    emoji: '🔥',
+    description: 'Targets your exhaustion by selling a "magic button" solution to your problems.'
+  },
+  { 
+    id: 'type_psych_imposter', 
+    name: 'Imposter Panacea (No Skill)', 
+    emoji: '🎓',
+    description: 'Lowers the barrier to entry to make complex success seem easy for anyone.'
+  },
+  { 
+    id: 'type_psych_paranoia', 
+    name: 'Peer Paranoia (Get Ahead)', 
+    emoji: '🕵️',
+    description: 'Weaponizes the fear that your peers are getting ahead of you.'
+  },
+  { 
+    id: 'type_psych_guilt', 
+    name: 'Execution Guilt (7 Prompts)', 
+    emoji: '✍️',
+    description: 'Makes you feel like your lack of progress is just due to missing a "secret" prompt.'
+  },
+  { 
+    id: 'type_algo_overload', 
+    name: 'Cognitive Overload (20 Tools)', 
+    emoji: '🧠',
+    description: 'Overwhelms you with massive data dumps to force a "Save/Bookmark" action.'
+  },
+  { 
+    id: 'type_algo_consensus', 
+    name: 'Manufactured Consensus (Reply GPT)', 
+    emoji: '🤖',
+    description: 'Demands a specific keyword comment to trick the algorithm into seeing organic engagement.'
+  },
+  { 
+    id: 'type_algo_curiosity', 
+    name: 'Curiosity Gap (Show More)', 
+    emoji: '🕳️',
+    description: 'Hides the payload behind a "Show more" button to artificially increase dwell time.'
+  },
+  { 
+    id: 'type_struct_math', 
+    name: 'Math-Washing (Tool+Time=$)', 
+    emoji: '🧮',
+    description: 'Uses absurd, oversimplified equations to bypass your logical skepticism.'
+  },
+  { 
+    id: 'type_struct_launder', 
+    name: 'Institutional Launder (Harvard)', 
+    emoji: '🏛️',
+    description: 'Borrows the credibility of elite institutions to make generic tools seem high-end.'
+  },
+  { 
+    id: 'type_struct_beta', 
+    name: 'Beta-Tester Loophole', 
+    emoji: '🧪',
+    description: 'Uses "in testing" claims to brag about fake profits without making legal guarantees.'
+  },
+  { 
+    id: 'type_visual_hijack', 
+    name: 'IP Hijacking (Spider-Man)', 
+    emoji: '🕷️',
+    description: 'Uses pop-culture icons to distract you from uncanny AI artifacts and melting backgrounds.'
+  },
+  { id: 'type_organic_human', name: 'Verified Organic (Human)', emoji: '🌿', description: 'High-quality, organic human content. Use this to help train the model on what NOT to catch.' },
+  ];
 
 const SLOP_HEURISTICS = {
   hardBlocks: [
-    { regex: /follow.{0,40}(dm|send)/gi, label: "Follow-for-DM Loop" },
-    { regex: /comment ["']?\w+/gi, label: "Comment Trigger" },
-    { regex: /free for \d+ (hour|day|hr)/gi, label: "Scarcity Bait" },
-    { regex: /must (follow|be following)/gi, label: "Gated Content" },
-    { regex: /\$[\d,]+.{0,15}(per day|per month|\/day|\/month|\/week|\/hr)/gi, label: "Income Claim" },
-    { regex: /(giveaway|cash giveaway|paypal cash)/gi, label: "Fake Giveaway" },
-    { regex: /faceless (youtube|channel)/gi, label: "YouTube Hustle" },
-    { regex: /normally.{0,15}\$/gi, label: "False Pricing" }
+    { regex: /follow.{0,40}(dm|send)/gi, label: "Follow-for-DM Loop", description: "A common extraction tactic that forces you to follow just to get a promised 'free' resource." },
+    { regex: /comment ["']?\w+/gi, label: "Comment Trigger", description: "Tricks the algorithm by demanding specific keywords to inflate engagement velocity." },
+    { regex: /free for \d+ (hour|day|hr)/gi, label: "Scarcity Bait", description: "Exploits the fear of missing out by creating fake time-pressure." },
+    { regex: /must (follow|be following)/gi, label: "Gated Content", description: "Content is hidden behind an engagement wall to harvest your account." },
+    { regex: /\$[\d,]+.{0,15}(per day|per month|\/day|\/month|\/week|\/hr)/gi, label: "Income Claim", description: "Unverified financial promises designed to bypass logical skepticism." },
+    { regex: /(giveaway|cash giveaway|paypal cash)/gi, label: "Fake Giveaway", description: "Often a front for bot-network expansion or phishing for your info." },
+    { regex: /faceless (youtube|channel)/gi, label: "YouTube Hustle", description: "A common 'passive income' trope used by slop factories to sell courses." },
+    { regex: /normally.{0,15}\$[\d]{2,4}/gi, label: "False Pricing / Fiat Anchor", description: "Uses specific, random numbers to make a scam look like a legitimate calculation." },
+    { regex: /\$[\d,]+.{0,15}in \d+ (minutes|min|hours|hrs)/gi, label: "Burnout Exploit", description: "Targets your exhaustion with a 'magic button' solution to your problems." },
+    { regex: /(harvard|google|mckinsey|stanford|mit).{0,30}(secret|workflow|method|consultant|mba)/gi, label: "Institutional Launder", description: "Steals the credibility of elite brands to launder the reputation of low-quality content." },
+    { regex: /(beta.testing|private discord|early access).{0,30}\$[\d,]+/gi, label: "Beta-Tester Loophole", description: "Uses exclusivity and 'testing' phases to hide a lack of real-world results." },
+    { regex: /(quit|replace).{0,20}9-to-5/gi, label: "Aspirational Trap", description: "Targets workers with a fantasy of escaping the system to farm their engagement." },
+    { regex: /(stop paying|replace).{0,30}(copywriters|developers|junior|employees)/gi, label: "Overhead Slaughterhouse", description: "Dehumanizes labor by claiming all human work is replaceable by current AI wrappers." }
   ],
   softSignals: [
-    { regex: /(like).{0,30}(repost|rt|retweet)/gi, points: 1, label: "Engagement Loop" },
-    { regex: /^breaking:/gi, points: 1, label: "Clickbait Opener" },
-    { regex: /no (coding|skills|experience|face|camera|editing)/gi, points: 1, label: "Hustle Buzzwords" },
-    { regex: /[\u{1D400}-\u{1D7FF}]/gu, points: 1, label: "Bold Unicode Spam" },
-    { regex: /(save (this|for later)|bookmark this)/gi, points: 0.5, label: "Save/Bookmark Bait" }
+    { regex: /(like).{0,30}(repost|rt|retweet)/gi, points: 1, label: "Engagement Loop", description: "The most basic form of algorithmic currency extraction." },
+    { regex: /^breaking:/gi, points: 1, label: "Clickbait Opener", description: "Artificially creates urgency to capture your initial scroll-speed." },
+    { regex: /no (coding|skills|experience|face|camera|editing)/gi, points: 1, label: "Hustle Buzzwords", description: "Lowers your critical guard by making success seem frictionless." },
+    { regex: /[\u{1D400}-\u{1D7FF}]/gu, points: 1, label: "Bold Unicode Spam", description: "Uses custom characters to bypass filters and stand out visually." },
+    { regex: /(save (this|for later)|bookmark this)/gi, points: 0.5, label: "Save/Bookmark Bait", description: "Exploits Miller's Law by overloading you with too much info to process now." },
+    { regex: /(no skill|no luck|no experience|anyone can).{0,30}(startup|build|money)/gi, points: 1, label: "Imposter Panacea", description: "Reverse Dunning-Kruger: making complex tech seem simple for the unqualified." },
+    { regex: /(procrastination|missing a prompt|launch by Monday)/gi, points: 1, label: "Execution Guilt Trip", description: "Blames external factors for internal failures to sell you a quick fix." },
+    { regex: /\+.{0,20}\+.{0,20}=/g, points: 1, label: "Math-Washing", description: "Weaponizes the Complexity Fallacy with oversimplified equations." },
+    { regex: /(spiderman|marvel|disney|mickey mouse|elon musk).{0,30}(ai|video|dance)/gi, points: 1, label: "IP Hijacking", description: "Uses nostalgia to shut down critical thinking while serving slop." },
+    { regex: /(changed my life|show more|read on|curiosity)/gi, points: 0.5, label: "Curiosity Gap", description: "Exploits Loewenstein's Information Gap Theory to increase dwell time." },
+    { regex: /7\.prompts/gi, points: 0.5, label: "Prompt List Formula", description: "Uses specific numbers to hack your brain's internal spam filter." }
   ]
 };
 
@@ -929,7 +1122,7 @@ function highlightSlopMarkers(element) {
       if (h.regex.test(text)) {
         html = html.replace(h.regex, (match) => {
           found = true; score += 5;
-          return `<span style="background: rgba(244, 33, 46, 0.25); border-bottom: 2px solid #f4212e; color: #f4212e; font-weight: bold;" title="HARD BLOCK: ${h.label}">${match}</span>`;
+          return `<span style="background: rgba(244, 33, 46, 0.25); border-bottom: 2px solid #f4212e; color: #f4212e; font-weight: bold; cursor: help;" title="${h.label}: ${h.description}">${match}</span>`;
         });
       }
     });
@@ -937,7 +1130,7 @@ function highlightSlopMarkers(element) {
       if (s.regex.test(text)) {
         html = html.replace(s.regex, (match) => {
           found = true; score += s.points;
-          return `<span style="background: rgba(255, 215, 0, 0.15); border-bottom: 2px dashed #ffd700; color: #ffd700;" title="SOFT SIGNAL: ${s.label} (+${s.points} pts)">${match}</span>`;
+          return `<span style="background: rgba(255, 215, 0, 0.15); border-bottom: 2px dashed #ffd700; color: #ffd700; cursor: help;" title="${s.label}: ${s.description}">${match}</span>`;
         });
       }
     });
@@ -1168,9 +1361,12 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
         let suggestedType = "";
         if (info?.text) {
           const text = info.text.toLowerCase();
-          if (text.includes('thread') || text.includes('🧵')) suggestedType = "type1";
-          else if (text.includes('passive income') || text.includes('faceless')) suggestedType = "type2";
-          else if (text.includes('my cousin') || text.includes('replies in')) suggestedType = "type3";
+          if (text.includes('$10k') || text.includes('10,000') || text.includes('60 minutes')) suggestedType = "type_psych_burnout";
+          else if (text.includes('no skill') || text.includes('no luck')) suggestedType = "type_psych_imposter";
+          else if (text.includes('20 tools') || text.includes('10 tools')) suggestedType = "type_algo_overload";
+          else if (text.includes('comment') || text.includes('reply')) suggestedType = "type_algo_consensus";
+          else if (text.includes('harvard') || text.includes('google') || text.includes('mckinsey')) suggestedType = "type_struct_launder";
+          else if (text.includes('thread') || text.includes('🧵')) suggestedType = "type_algo_curiosity";
         }
         const reportBtn = document.createElement('button');
         reportBtn.innerText = '🚩 Report as AI Slop';
@@ -1185,17 +1381,32 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
           toggleDetails.innerText = detailsDrawer.style.display === 'none' ? "Add Details (Optional) ▾" : "Hide Details ▴";
         };
         const slopSelect = document.createElement('select');
-        slopSelect.style.cssText = "width: 100%; padding: 5px; border-radius: 6px; border: 1px solid #cfd9de; font-size: 0.8rem; margin-bottom: 10px;";
+        slopSelect.style.cssText = "width: 100%; padding: 5px; border-radius: 6px; border: 1px solid #cfd9de; font-size: 0.8rem; margin-bottom: 6px;";
+        const descBox = document.createElement('div');
+        descBox.style.cssText = "font-size: 0.75rem; color: #536471; background: #fff; border: 1px solid #e1e8ed; padding: 8px; border-radius: 6px; margin-bottom: 10px; line-height: 1.3; display: none;";
         const defaultOpt = document.createElement('option');
         defaultOpt.value = ""; defaultOpt.text = "General Slop";
         slopSelect.appendChild(defaultOpt);
         SLOP_TYPES.forEach(t => {
           const opt = document.createElement('option');
           opt.value = t.id; opt.text = `${t.emoji} ${t.name}`;
+          opt.title = t.description; // Tooltip on hover
           if (t.id === suggestedType) opt.selected = true;
           slopSelect.appendChild(opt);
         });
+        const updateDesc = () => {
+          const selected = SLOP_TYPES.find(t => t.id === slopSelect.value);
+          if (selected) {
+            descBox.innerText = selected.description;
+            descBox.style.display = 'block';
+          } else {
+            descBox.style.display = 'none';
+          }
+        };
+        slopSelect.onchange = updateDesc;
+        if (suggestedType) updateDesc();
         detailsDrawer.appendChild(slopSelect);
+        detailsDrawer.appendChild(descBox);
         const createCheck = (id, label) => {
           const div = document.createElement('label');
           div.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 0.75rem; margin-bottom: 4px; cursor: pointer;";
@@ -1248,9 +1459,31 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
             reportBtn.disabled = true; toggleDetails.remove(); detailsDrawer.remove();
           }
         };
+
+        const safeBtn = document.createElement('button');
+        safeBtn.innerText = '🌿 Mark as Organic (Human)';
+        safeBtn.style.cssText = `background: #00ba7c; color: white; border: none; padding: 12px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.95rem; margin-top: 5px;`;
+        safeBtn.onclick = () => {
+          if (info) {
+            chrome.runtime.sendMessage({
+              action: "manualReport",
+              aiScore: 0,
+              slopType: "type_organic_human",
+              shieldType: "shield-green",
+              ...info
+            });
+            safeBtn.innerText = '✅ Verified Organic';
+            safeBtn.disabled = true;
+            if (reportBtn) reportBtn.remove();
+            toggleDetails.remove();
+            detailsDrawer.remove();
+          }
+        };
+
         btnContainer.appendChild(toggleDetails);
         btnContainer.appendChild(detailsDrawer);
         btnContainer.appendChild(reportBtn);
+        btnContainer.appendChild(safeBtn);
       }
       const posterBtn = document.createElement('button');
       posterBtn.innerText = '🖼️ Generate Wanted Poster';

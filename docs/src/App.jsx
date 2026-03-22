@@ -403,7 +403,20 @@ function App() {
                   if (pass === "zeroslop-research-2026") {
                     const [reg, acc, susp] = await Promise.all([fetchAllPages('slop_registry'), fetchAllPages('slop_accounts'), fetchAllPages('suspicious_accounts')]);
                     const escapeCSV = (str) => { if (!str) return '""'; const clean = str.toString().replace(/"/g, '""').replace(/\n/g, ' '); return `"${clean}"`; };
-                    const csvRows = [ ["Type", "Handle", "Text", "AI Score", "Detected At"], ...reg.map(d => ["Tweet", escapeCSV(d.fields.author_handle?.stringValue), escapeCSV(d.fields.text?.stringValue), d.fields.ai_score?.doubleValue || d.fields.ai_score?.integerValue || 0, escapeCSV(d.updateTime)]), ...acc.map(d => ["Factory", escapeCSV(d.fields.handle?.stringValue), "N/A", 100, escapeCSV(d.updateTime || d.createTime)]), ...susp.map(d => ["Amplifier", escapeCSV(d.fields.handle?.stringValue), "N/A", 50, escapeCSV(d.updateTime || d.createTime)]) ];
+                    const csvRows = [ 
+                      ["Type", "Handle", "Text", "AI Score", "Detected At", "Label"], 
+                      ...reg.map(d => {
+                        const score = d.fields.ai_score?.doubleValue || d.fields.ai_score?.integerValue || 0;
+                        const slopType = d.fields.slop_type?.stringValue;
+                        let label = score > 15 ? "ai-generated" : "organic-human";
+                        if (slopType && slopType !== "type_organic_human") label = "slop-factory";
+                        if (slopType === "type_organic_human") label = "organic-human";
+                        
+                        return ["Tweet", escapeCSV(d.fields.author_handle?.stringValue), escapeCSV(d.fields.text?.stringValue), score, escapeCSV(d.updateTime), label];
+                      }), 
+                      ...acc.map(d => ["Factory", escapeCSV(d.fields.handle?.stringValue), "N/A", 100, escapeCSV(d.updateTime || d.createTime), "slop-factory"]), 
+                      ...susp.map(d => ["Amplifier", escapeCSV(d.fields.handle?.stringValue), "N/A", 50, escapeCSV(d.updateTime || d.createTime), "slop-factory"]) 
+                    ];
                     const csvContent = csvRows.map(e => e.join(",")).join("\n");
                     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                     const url = URL.createObjectURL(blob);

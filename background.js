@@ -155,7 +155,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.shieldType && request.author) {
       storeSlopFactoryReport(request.author, request.shieldType);
       
-      const action = request.shieldType === 'shield-red' ? "showSlopFactoryWarning" : "showHighAIWarning";
+      const actionMap = {
+        'shield-red': "showSlopFactoryWarning",
+        'shield-blue': "showHighAIWarning",
+        'shield-green': "showOrganicSuccess"
+      };
+      
+      const action = actionMap[request.shieldType] || "showSlopFactoryWarning";
       chrome.tabs.sendMessage(sender.tab.id, {
         action: action,
         handle: request.author.handle
@@ -196,7 +202,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "checkSlopAccount") {
     checkSlopAccount(request.handle).then(data => {
       if (data) {
-        const action = data.shield_type === 'blue' ? "showHighAIWarning" : "showSlopFactoryWarning";
+        let action = "showSlopFactoryWarning";
+        if (data.shield_type === 'blue') action = "showHighAIWarning";
+        if (data.shield_type === 'green') action = "showOrganicSuccess";
+        
         chrome.tabs.sendMessage(sender.tab.id, {
           action: action,
           handle: request.handle
@@ -376,7 +385,7 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
       handle: { stringValue: author.handle },
       name: { stringValue: author.name || "" },
       pfp: { stringValue: author.pfp || "" },
-      shield_type: { stringValue: shieldType === 'shield-red' ? 'red' : shieldType === 'shield-blue' ? 'blue' : 'none' },
+      shield_type: { stringValue: shieldType === 'shield-red' ? 'red' : shieldType === 'shield-blue' ? 'blue' : shieldType === 'shield-green' ? 'green' : 'none' },
       last_reported: { timestampValue: new Date().toISOString() }
     };
 
@@ -407,10 +416,12 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
     });
 
     if (response.ok) {
-      console.log(`ZeroSlop: Successfully reported factory ${author.handle}`);
-      // Increment global slop count for the report
-      updateGlobalStats('total_slops');
-      incrementSlopsCaught();
+      console.log(`ZeroSlop: Successfully reported ${shieldType} ${author.handle}`);
+      if (shieldType !== 'shield-green') {
+        // Increment global slop count for the report
+        updateGlobalStats('total_slops');
+        incrementSlopsCaught();
+      }
     }
   } catch (e) {
     console.error("ZeroSlop: Error reporting slop factory (atomic)", e);
@@ -561,15 +572,15 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     fields.test_replicability = { booleanValue: !!extractionResults.replicability };
   }
 
-  const isSlop = (percentage > 15 || isManual);
+  const isSlop = (percentage > 15 || isManual) && slopType !== 'type_organic_human';
 
-  if (percentage > 0) {
+  if (percentage > 0 && slopType !== 'type_organic_human') {
     fields.ai_score = { doubleValue: parseFloat(percentage) };
     if (percentage > 15) {
       incrementSlopsCaught();
       updateGlobalStats('total_slops');
     }
-  } else if (isManual) {
+  } else if (isManual && slopType !== 'type_organic_human') {
     incrementSlopsCaught();
     updateGlobalStats('total_slops');
   }

@@ -24,6 +24,8 @@
     .tabs { display: flex; margin-bottom: 15px; border-bottom: 1px solid #ccc; }
     .tab { flex: 1; text-align: center; padding: 5px; cursor: pointer; color: #777; font-weight: bold; font-size: 0.9rem;}
     .tab.active { color: #1d9bf0; border-bottom: 2px solid #1d9bf0; }
+    .tab { flex: 1; text-align: center; padding: 8px; cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab.active { border-bottom: 2px solid #1d9bf0; color: #1d9bf0; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
     .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; font-size: 0.9rem; font-weight: bold;}
@@ -82,12 +84,6 @@
     <div style="margin-bottom: 15px; font-size: 0.85rem; color: #555;">
       Action threshold: <span id="thresholdVal">85</span>%
       <input type="range" id="thresholdSlider" min="0" max="100" value="85" style="width: 100%; margin-top: 5px;">
-    </div>
-
-    <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
-    <div id="updateSection">
-      <button id="updateBtn" style="background-color: #24292f;">Check for Updates</button>
-      <div id="updateStatus" class="status" style="margin-top: 5px;"></div>
     </div>
   </div>
 

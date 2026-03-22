@@ -2,8 +2,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const apiKeyInput = document.getElementById('apiKey');
   const saveBtn = document.getElementById('saveBtn');
   const statusEl = document.getElementById('status');
-  const updateBtn = document.getElementById('updateBtn');
-  const updateStatus = document.getElementById('updateStatus');
   const autoScanToggle = document.getElementById('autoScanToggle');
   const hunterVisionToggle = document.getElementById('hunterVisionToggle');
   const slopAction = document.getElementById('slopAction');
@@ -139,28 +137,5 @@ document.addEventListener('DOMContentLoaded', () => {
       a.click();
       URL.revokeObjectURL(url);
     });
-  });
-
-  // Check for updates
-  updateBtn.addEventListener('click', async () => {
-    updateStatus.textContent = 'Checking GitHub...';
-    updateStatus.className = 'status';
-    try {
-      const response = await fetch(`${rawManifestUrl}?t=${Date.now()}`);
-      if (!response.ok) throw new Error('Network error');
-      const remoteManifest = await response.json();
-      const localVersion = chrome.runtime.getManifest().version;
-
-      if (remoteManifest.version !== localVersion) {
-        updateStatus.innerHTML = `New version <b>${remoteManifest.version}</b> available! <br><a href="${repoUrl}" target="_blank" style="color: #1d9bf0;">Click here to pull changes from GitHub</a>.`;
-        updateStatus.className = 'status success';
-      } else {
-        updateStatus.textContent = `You are on the latest version (${localVersion}).`;
-        updateStatus.className = 'status success';
-      }
-    } catch (e) {
-      updateStatus.textContent = 'Could not fetch from GitHub. Ensure your internet is connected and the repo is public.';
-      updateStatus.className = 'status error';
-    }
   });
 });
