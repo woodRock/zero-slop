@@ -24,6 +24,8 @@
     .tabs { display: flex; margin-bottom: 15px; border-bottom: 1px solid #ccc; }
     .tab { flex: 1; text-align: center; padding: 5px; cursor: pointer; color: #777; font-weight: bold; font-size: 0.9rem;}
     .tab.active { color: #1d9bf0; border-bottom: 2px solid #1d9bf0; }
+    .tab { flex: 1; text-align: center; padding: 8px; cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab.active { border-bottom: 2px solid #1d9bf0; color: #1d9bf0; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
     .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; font-size: 0.9rem; font-weight: bold;}
@@ -34,6 +36,15 @@
     .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
     input:checked + .slider { background-color: #1d9bf0; }
     input:checked + .slider:before { transform: translateX(14px); }
+
+    /* Accordion/Collapsable */
+    .advanced-toggle { cursor: pointer; color: #1d9bf0; font-size: 0.85rem; font-weight: bold; margin-top: 20px; display: flex; align-items: center; justify-content: center; border-top: 1px solid #eee; padding-top: 10px;}
+    .advanced-content { display: none; margin-top: 15px; }
+    .advanced-content.show { display: block; }
+
+    .tutorial-card { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 10px; margin-bottom: 15px; font-size: 0.8rem; line-height: 1.4; }
+    .tutorial-card h3 { margin: 0 0 5px 0; font-size: 0.85rem; color: #0369a1; }
+    .disclaimer { font-size: 0.7rem; color: #666; margin-top: -12px; margin-bottom: 15px; line-height: 1.3; font-style: italic; }
   </style>
 </head>
 <body>
@@ -44,50 +55,113 @@
   </div>
 
   <div id="settings" class="tab-content active">
-    <h2>Configuration</h2>
-    <div class="onboarding">
-      Don't have an API key? <a href="https://zerogpt.com" target="_blank">Get one from ZeroGPT</a>.
+    <div class="tutorial-card">
+      <h3>🛡️ The ZeroSlop Defense Strategy</h3>
+      <p style="margin-top: 5px;">We protect your timeline using 4 layers of defense:</p>
+      <ul style="padding-left: 15px; margin: 5px 0;">
+        <li><strong>Layer 1: Community Shield</strong> (Free) - Blocks known slop from our registry.</li>
+        <li><strong>Layer 2: Bounty Hunter</strong> (Free) - Highlights 72% of slop via local rules.</li>
+        <li><strong>Layer 3: Smart Slop Guard</strong> (Free) - Uses ML to catch "sneaky" slop patterns.</li>
+        <li><strong>Layer 4: Deep Forensic Scan</strong> (Paid) - Uses ZeroGPT API for 99% certainty.</li>
+      </ul>
+      <div style="margin-top: 8px; border-top: 1px solid #bae6fd; padding-top: 8px;">
+        <strong>AI Slop</strong>: Generic content designed to farm engagement.<br>
+        <strong>Slop Factory</strong>: Accounts that mass-produce slop industrially.
+      </div>
+      <div style="margin-top: 8px; font-size: 0.75rem; color: #0369a1; background: #e0f2fe; padding: 6px; border-radius: 4px;">
+        🚀 <strong>Community Powered</strong>: Every scan helps train the Smart Slop Guard. The more we hunt, the better the free model becomes.
+      </div>
+      <div style="margin-top: 8px; font-size: 0.7rem; color: #666; font-style: italic;">
+        🔒 <strong>Privacy First</strong>: Anonymous slop detection is the ONLY data we collect. No personal info, no fingerprinting, no tracking, and no data selling.
+      </div>
     </div>
-    <label for="apiKey">API Key:</label>
-    <input type="password" id="apiKey" placeholder="Enter your API Key here">
-    <button id="saveBtn">Save API Key</button>
-    <div id="status" class="status"></div>
 
-    <div class="toggle-container">
-      <span>Auto-Scan Tweets (Uses API)</span>
+    <div class="toggle-container" style="margin-bottom: 5px;">
+      <span>Layer 1: Community Shield (Recommended)</span>
       <label class="switch">
-        <input type="checkbox" id="autoScanToggle">
+        <input type="checkbox" id="communityShieldToggle">
         <span class="slider"></span>
       </label>
     </div>
+    <div class="disclaimer">
+      Free. Checks tweets against the community registry of known slop.
+    </div>
 
-    <div class="toggle-container">
-      <span>Bounty Hunter Vision</span>
+    <div class="toggle-container" style="margin-bottom: 5px;">
+      <span>Layer 2: Bounty Hunter Vision</span>
       <label class="switch">
         <input type="checkbox" id="hunterVisionToggle">
         <span class="slider"></span>
       </label>
     </div>
-    <div style="font-size: 0.75rem; color: #666; margin-bottom: 15px; margin-top: -10px;">
-      Heuristic highlighting of extraction hooks (Free).
+    <div class="disclaimer">
+      Free. Highlights engagement-farming patterns (like 'X prompts' or '$10k/mo') in red.
     </div>
 
-    <label for="slopAction">Slop Action (Threshold Met):</label>
-    <select id="slopAction" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 10px; font-size: 0.9rem;">
-      <option value="none">Show Badge Only</option>
-      <option value="blur" selected>Blur Content (Default)</option>
-      <option value="zap">Zap (Remove from Timeline)</option>
-    </select>
-
-    <div style="margin-bottom: 15px; font-size: 0.85rem; color: #555;">
-      Action threshold: <span id="thresholdVal">85</span>%
-      <input type="range" id="thresholdSlider" min="0" max="100" value="85" style="width: 100%; margin-top: 5px;">
+    <div class="toggle-container" style="margin-bottom: 5px;">
+      <span>Layer 3: Smart Slop Guard (Beta)</span>
+      <label class="switch">
+        <input type="checkbox" id="autoHumanDetectionToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="disclaimer">
+      Free. Uses a local pattern-matching model to detect the "structural DNA" of slop factories.
     </div>
 
-    <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
-    <div id="updateSection">
-      <button id="updateBtn" style="background-color: #24292f;">Check for Updates</button>
-      <div id="updateStatus" class="status" style="margin-top: 5px;"></div>
+    <div class="advanced-toggle" id="advancedToggle">
+      ⚙️ Advanced & Paid Settings ▾
+    </div>
+
+    <div class="advanced-content" id="advancedContent">
+      <h3 style="font-size: 0.9rem; margin-top: 0; color: #1d9bf0;">Layer 4: Deep Forensic Scan (Paid)</h3>
+      <div class="onboarding" style="margin-bottom: 10px;">
+        <div style="font-size: 0.75rem; color: #666; margin-bottom: 10px; background: #fffbeb; padding: 8px; border: 1px solid #fef3c7; border-radius: 6px;">
+          ⚠️ <strong>Subscription Required</strong>: Deep scans require a ZeroGPT.com API key which costs credits.
+        </div>
+        <label for="apiKey">ZeroGPT API Key:</label>
+        <input type="password" id="apiKey" placeholder="Enter your API Key">
+        <button id="saveBtn">Save API Key</button>
+        <div id="status" class="status"></div>
+      </div>
+
+      <label for="slopAction">Slop Action (Threshold Met):</label>
+      <select id="slopAction" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 10px; font-size: 0.9rem;">
+        <option value="none">Show Badge Only</option>
+        <option value="blur" selected>Blur Content (Default)</option>
+        <option value="zap">Zap (Remove from Timeline)</option>
+      </select>
+
+      <div style="margin-bottom: 15px; font-size: 0.85rem; color: #555;">
+        Action threshold: <span id="thresholdVal">85</span>%
+        <input type="range" id="thresholdSlider" min="0" max="100" value="85" style="width: 100%; margin-top: 5px;">
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
+
+      <div class="toggle-container" style="margin-bottom: 5px;">
+        <span>Layer 4: Auto-Scan with ZeroGPT API</span>
+        <label class="switch">
+          <input type="checkbox" id="autoScanToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="disclaimer" style="color: #dc3545; border: 1px solid #dc3545; padding: 8px; border-radius: 4px; margin-top: 5px;">
+        ⚠️ <strong>Uses API Credits</strong>: Automatically scans every tweet with ZeroGPT. Credits consumed quickly on active timelines.
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
+
+      <div class="toggle-container" style="margin-bottom: 5px;">
+        <span style="color: #dc3545; font-weight: bold;">🔧 Admin: Organic Data Collection</span>
+        <label class="switch">
+          <input type="checkbox" id="adminOrganicToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="disclaimer" style="color: #dc3545; border: 1px solid #dc3545; padding: 8px; border-radius: 4px; margin-top: 5px;">
+        ⚠️ <strong>Developer Tool Only</strong>: Auto-scans all tweets via ZeroGPT API. Shows voting badges to collect organic-human labeled data. Uses API credits rapidly.
+      </div>
     </div>
   </div>
 

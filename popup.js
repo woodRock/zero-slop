@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const apiKeyInput = document.getElementById('apiKey');
   const saveBtn = document.getElementById('saveBtn');
   const statusEl = document.getElementById('status');
+  const communityShieldToggle = document.getElementById('communityShieldToggle');
   const autoScanToggle = document.getElementById('autoScanToggle');
   const hunterVisionToggle = document.getElementById('hunterVisionToggle');
   const smartSlopGuardToggle = document.getElementById('autoHumanDetectionToggle');
@@ -12,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const clearHistoryBtn = document.getElementById('clearHistoryBtn');
   const historyList = document.getElementById('historyList');
   const slopsCaughtCountEl = document.getElementById('slopsCaughtCount');
+  const adminOrganicToggle = document.getElementById('adminOrganicToggle');
   
   const repoUrl = 'https://github.com/woodRock/zero-slop';
   const rawManifestUrl = 'https://raw.githubusercontent.com/woodRock/zero-slop/main/manifest.json';
@@ -27,11 +29,15 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load state
-  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'slopAction', 'hideThreshold', 'scanHistory', 'slopsCaught', 'hunterVision', 'autoHumanDetection'], (result) => {
+  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'communityShield', 'slopAction', 'hideThreshold', 'scanHistory', 'slopsCaught', 'hunterVision', 'autoHumanDetection', 'adminOrganicCollection'], (result) => {
     if (result.zerogptApiKey) {
       apiKeyInput.value = result.zerogptApiKey;
       statusEl.textContent = 'API Key is already set.';
       statusEl.className = 'status success';
+    }
+    if (result.communityShield !== false) {
+      // Enabled by default
+      communityShieldToggle.checked = result.communityShield !== false;
     }
     if (result.autoScan) {
       autoScanToggle.checked = true;
@@ -41,6 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (result.autoHumanDetection) {
       smartSlopGuardToggle.checked = true;
+    }
+    if (result.adminOrganicCollection) {
+      adminOrganicToggle.checked = true;
     }
     if (result.slopAction) {
       slopAction.value = result.slopAction;
@@ -70,7 +79,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Toggle auto-scan
+  // Toggle community shield (Layer 1)
+  communityShieldToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ communityShield: e.target.checked });
+  });
+
+  // Toggle auto-scan (Layer 4)
   autoScanToggle.addEventListener('change', (e) => {
     chrome.storage.local.set({ autoScan: e.target.checked });
   });
@@ -83,6 +97,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Toggle auto human detection (now Smart Slop Guard)
   smartSlopGuardToggle.addEventListener('change', (e) => {
     chrome.storage.local.set({ autoHumanDetection: e.target.checked });
+  });
+
+  // Toggle admin organic data collection
+  adminOrganicToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ adminOrganicCollection: e.target.checked });
   });
 
   // Update slop action

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ZeroSlop: Community-Powered AI Detector for X",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "The forensic shield for your timeline. Instantly detect, highlight, and zap AI-generated 'slop' and bot networks on X (Twitter).",
   "permissions": [
     "storage",

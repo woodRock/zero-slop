@@ -139,39 +139,20 @@ function scanAmplifiers(tweetId) {
 // Handle messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "autoScanTweet") {
-    chrome.storage.local.get(['autoScan'], (result) => {
-      if (result.autoScan) {
-        performDetection(request.text, sender.tab.id, request.tweetId, true, request.author);
+    chrome.storage.local.get(['autoScan', 'adminOrganicCollection'], (result) => {
+      if (result.autoScan || result.adminOrganicCollection) {
+        console.log(`ZeroSlop: Auto-scan tweet ${request.tweetId} (admin mode: ${result.adminOrganicCollection})`);
+        performDetection(request.text, sender.tab.id, request.tweetId, true, request.author, false, result.adminOrganicCollection);
       }
     });
-  } else if (request.action === "closeScanTab") {
-    if (sender.tab && sender.tab.id) {
-      chrome.tabs.remove(sender.tab.id);
-    }
-  } else if (request.action === "manualReport") {
-    const score = request.aiScore || 0;
-    storeSlopTweet(request.tweetId, request.text, score, request.author, true, request.slopType, request.extractionResults);
-    
-    if (request.shieldType && request.author) {
-      storeSlopFactoryReport(request.author, request.shieldType);
-      
-      const action = request.shieldType === 'shield-red' ? "showSlopFactoryWarning" : "showHighAIWarning";
-      chrome.tabs.sendMessage(sender.tab.id, {
-        action: action,
-        handle: request.author.handle
-      });
-    }
-  } else if (request.action === "voteSlop") {
-    voteSlopTweet(request.tweetId, request.voteType);
-  } else if (request.action === "voteAccount") {
-    voteSlopAccount(request.handle, request.voteType);
   } else if (request.action === "checkRegistry") {
+    // Layer 1: Community Shield - always check registry (free)
     checkRegistry(request.tweetId).then(data => {
       if (data) {
         chrome.tabs.sendMessage(sender.tab.id, {
           action: "showResult",
-          data: { 
-            fakePercentage: data.ai_score, 
+          data: {
+            fakePercentage: data.ai_score,
             feedback_message: "From ZeroSlop Registry",
             upvotes: data.upvotes,
             downvotes: data.downvotes
@@ -185,6 +166,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
     });
     return true;
+  } else if (request.action === "closeScanTab") {
+    if (sender.tab && sender.tab.id) {
+      chrome.tabs.remove(sender.tab.id);
+    }
+  } else if (request.action === "manualReport") {
+    const score = request.aiScore || 0;
+    storeSlopTweet(request.tweetId, request.text, score, request.author, true, request.slopType, request.extractionResults);
+
+    if (request.shieldType && request.author) {
+      storeSlopFactoryReport(request.author, request.shieldType);
+
+      const actionMap = {
+        'shield-red': "showSlopFactoryWarning",
+        'shield-blue': "showHighAIWarning",
+        'shield-green': "showOrganicSuccess"
+      };
+
+      const action = actionMap[request.shieldType] || "showSlopFactoryWarning";
+      chrome.tabs.sendMessage(sender.tab.id, {
+        action: action,
+        handle: request.author.handle
+      });
+    }
+  } else if (request.action === "voteSlop") {
+    voteSlopTweet(request.tweetId, request.voteType);
+  } else if (request.action === "voteAccount") {
+    voteSlopAccount(request.handle, request.voteType);
+  } else if (request.action === "voteHuman") {
+    console.log(`ZeroSlop: Received voteHuman action for tweet ${request.tweetId}, voteType: ${request.voteType}`);
+    if (request.voteType === 'up') {
+      console.log(`ZeroSlop: Calling storeHumanTweet for ${request.tweetId} with author ${request.author?.handle}`);
+      storeHumanTweet(request.tweetId, request.text, request.author);
+    }
+    // Thumbs down: discard, do nothing
   } else if (request.action === "reportSuspicious") {
     storeSuspiciousAccount(request.handle, request.name, request.pfp, request.tweetId, request.factoryHandle);
   } else if (request.action === "manualReportAccount") {
@@ -196,7 +211,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "checkSlopAccount") {
     checkSlopAccount(request.handle).then(data => {
       if (data) {
-        const action = data.shield_type === 'blue' ? "showHighAIWarning" : "showSlopFactoryWarning";
+        let action = "showSlopFactoryWarning";
+        if (data.shield_type === 'blue') action = "showHighAIWarning";
+        if (data.shield_type === 'green') action = "showOrganicSuccess";
+        
         chrome.tabs.sendMessage(sender.tab.id, {
           action: action,
           handle: request.handle
@@ -376,7 +394,7 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
       handle: { stringValue: author.handle },
       name: { stringValue: author.name || "" },
       pfp: { stringValue: author.pfp || "" },
-      shield_type: { stringValue: shieldType === 'shield-red' ? 'red' : shieldType === 'shield-blue' ? 'blue' : 'none' },
+      shield_type: { stringValue: shieldType === 'shield-red' ? 'red' : shieldType === 'shield-blue' ? 'blue' : shieldType === 'shield-green' ? 'green' : 'none' },
       last_reported: { timestampValue: new Date().toISOString() }
     };
 
@@ -407,23 +425,25 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
     });
 
     if (response.ok) {
-      console.log(`ZeroSlop: Successfully reported factory ${author.handle}`);
-      // Increment global slop count for the report
-      updateGlobalStats('total_slops');
-      incrementSlopsCaught();
+      console.log(`ZeroSlop: Successfully reported ${shieldType} ${author.handle}`);
+      if (shieldType !== 'shield-green') {
+        // Increment global slop count for the report
+        updateGlobalStats('total_slops');
+        incrementSlopsCaught();
+      }
     }
   } catch (e) {
     console.error("ZeroSlop: Error reporting slop factory (atomic)", e);
   }
 }
 
-async function performDetection(text, tabId, tweetId = null, isAutoScan = false, author = null, isThread = false) {
+async function performDetection(text, tabId, tweetId = null, isAutoScan = false, author = null, isThread = false, isAdminMode = false) {
   const { zerogptApiKey } = await chrome.storage.local.get(['zerogptApiKey']);
   if (!zerogptApiKey) {
     if (!isAutoScan) {
-      chrome.tabs.sendMessage(tabId, { 
-        action: "showError", 
-        message: "API Key is missing! Please set it in the extension popup." 
+      chrome.tabs.sendMessage(tabId, {
+        action: "showError",
+        message: "API Key is missing! Please set it in the extension popup."
       });
     }
     return;
@@ -443,7 +463,7 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
       if (result.success) {
         const percentage = result.data.fakePercentage || 0;
         saveToHistory(text, percentage, result.data.textWords);
-        
+
         if (percentage > 15) {
           incrementSlopsCaught();
           updateGlobalStats('total_slops');
@@ -453,17 +473,31 @@ async function performDetection(text, tabId, tweetId = null, isAutoScan = false,
           storeSlopTweet(tweetId, text, percentage, author, false);
         }
 
-        chrome.tabs.sendMessage(tabId, {
-          action: "showResult",
-          data: { 
-            ...result.data, 
-            feedback_message: isThread ? `Thread Analysis: ${result.data.feedback_message || "Analyzed"}` : result.data.feedback_message,
-            upvotes: 0,
-            downvotes: 0
-          },
-          tweetId: tweetId,
-          isAutoScan: isAutoScan
-        });
+        // Admin mode: send different message for badge injection
+        if (isAdminMode) {
+          console.log(`ZeroSlop Admin: Sending badge message for tweet ${tweetId} at ${percentage}%`);
+          chrome.tabs.sendMessage(tabId, {
+            action: "adminShowBadge",
+            data: {
+              percentage: percentage,
+              tweetId: tweetId,
+              author: author
+            },
+            isAutoScan: isAutoScan
+          });
+        } else {
+          chrome.tabs.sendMessage(tabId, {
+            action: "showResult",
+            data: {
+              ...result.data,
+              feedback_message: isThread ? `Thread Analysis: ${result.data.feedback_message || "Analyzed"}` : result.data.feedback_message,
+              upvotes: 0,
+              downvotes: 0
+            },
+            tweetId: tweetId,
+            isAutoScan: isAutoScan
+          });
+        }
       }
     }
   } catch (error) {
@@ -561,15 +595,15 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     fields.test_replicability = { booleanValue: !!extractionResults.replicability };
   }
 
-  const isSlop = (percentage > 15 || isManual);
+  const isSlop = (percentage > 15 || isManual) && slopType !== 'type_organic_human';
 
-  if (percentage > 0) {
+  if (percentage > 0 && slopType !== 'type_organic_human') {
     fields.ai_score = { doubleValue: parseFloat(percentage) };
     if (percentage > 15) {
       incrementSlopsCaught();
       updateGlobalStats('total_slops');
     }
-  } else if (isManual) {
+  } else if (isManual && slopType !== 'type_organic_human') {
     incrementSlopsCaught();
     updateGlobalStats('total_slops');
   }
@@ -618,6 +652,56 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     }
   } catch (e) {
     console.error("ZeroSlop: Network error during commit:", e);
+  }
+}
+
+async function storeHumanTweet(tweetId, text, author) {
+  console.log(`ZeroSlop: storeHumanTweet called with tweetId=${tweetId}, text length=${text?.length}, author=${author?.handle}`);
+  
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
+
+  const fields = {
+    tweet_id: { stringValue: tweetId },
+    text: { stringValue: text?.substring(0, 1000) || "" },
+    status: { stringValue: "verified_human" },
+    label: { stringValue: "organic-human" },
+    last_updated: { timestampValue: new Date().toISOString() }
+  };
+
+  if (author) {
+    if (author.name) fields.author_name = { stringValue: author.name };
+    if (author.handle) fields.author_handle = { stringValue: author.handle };
+    if (author.pfp) fields.author_pfp = { stringValue: author.pfp };
+  }
+
+  console.log(`ZeroSlop: Firestore commit payload:`, JSON.stringify({tweetId, fields}, null, 2));
+
+  const body = {
+    writes: [{
+      update: {
+        name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/human_registry/${tweetId}`,
+        fields: fields
+      }
+    }]
+  };
+
+  try {
+    console.log(`ZeroSlop: Sending commit request to Firestore...`);
+    const response = await fetch(commitUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+
+    console.log(`ZeroSlop: Firestore response status: ${response.status}`);
+    if (response.ok) {
+      console.log(`ZeroSlop: Successfully stored human tweet ${tweetId}`);
+    } else {
+      const err = await response.text();
+      console.error(`ZeroSlop: Commit failed for human tweet: ${err}`);
+    }
+  } catch (e) {
+    console.error("ZeroSlop: Network error during human tweet commit:", e);
   }
 }
 

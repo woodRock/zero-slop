@@ -77,6 +77,17 @@
     </div>
 
     <div class="toggle-container" style="margin-bottom: 5px;">
+      <span>Layer 1: Community Shield (Recommended)</span>
+      <label class="switch">
+        <input type="checkbox" id="communityShieldToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="disclaimer">
+      Free. Checks tweets against the community registry of known slop.
+    </div>
+
+    <div class="toggle-container" style="margin-bottom: 5px;">
       <span>Layer 2: Bounty Hunter Vision</span>
       <label class="switch">
         <input type="checkbox" id="hunterVisionToggle">
@@ -114,19 +125,6 @@
         <div id="status" class="status"></div>
       </div>
 
-      <div class="toggle-container">
-        <span>Layer 1: Auto-Scan Community Shield</span>
-        <label class="switch">
-          <input type="checkbox" id="autoScanToggle">
-          <span class="slider"></span>
-        </label>
-      </div>
-      <div class="disclaimer" style="margin-top: 0;">
-        Checks every tweet against the cloud registry (Uses API credits if not found).
-      </div>
-
-      <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
-
       <label for="slopAction">Slop Action (Threshold Met):</label>
       <select id="slopAction" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 10px; font-size: 0.9rem;">
         <option value="none">Show Badge Only</option>
@@ -137,6 +135,32 @@
       <div style="margin-bottom: 15px; font-size: 0.85rem; color: #555;">
         Action threshold: <span id="thresholdVal">85</span>%
         <input type="range" id="thresholdSlider" min="0" max="100" value="85" style="width: 100%; margin-top: 5px;">
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
+
+      <div class="toggle-container" style="margin-bottom: 5px;">
+        <span>Layer 4: Auto-Scan with ZeroGPT API</span>
+        <label class="switch">
+          <input type="checkbox" id="autoScanToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="disclaimer" style="color: #dc3545; border: 1px solid #dc3545; padding: 8px; border-radius: 4px; margin-top: 5px;">
+        ⚠️ <strong>Uses API Credits</strong>: Automatically scans every tweet with ZeroGPT. Credits consumed quickly on active timelines.
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
+
+      <div class="toggle-container" style="margin-bottom: 5px;">
+        <span style="color: #dc3545; font-weight: bold;">🔧 Admin: Organic Data Collection</span>
+        <label class="switch">
+          <input type="checkbox" id="adminOrganicToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="disclaimer" style="color: #dc3545; border: 1px solid #dc3545; padding: 8px; border-radius: 4px; margin-top: 5px;">
+        ⚠️ <strong>Developer Tool Only</strong>: Auto-scans all tweets via ZeroGPT API. Shows voting badges to collect organic-human labeled data. Uses API credits rapidly.
       </div>
     </div>
   </div>

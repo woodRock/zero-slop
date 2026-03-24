@@ -48,6 +48,12 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    // Human Registry: Verified human-generated tweets (research access)
+    match /human_registry/{tweetId} {
+      allow read: if true;
+      allow write: if request.resource.data.label == "organic-human";
+    }
+
     // Catch-all deny for safety
     match /{document=**} {
       allow read: if true; // Allow all reads for debugging/transparency

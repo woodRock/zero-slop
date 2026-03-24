@@ -8,6 +8,18 @@ document.addEventListener('contextmenu', (event) => {
 // Global to store the last detection result for the current tweet/profile
 let currentOverlayInfo = null;
 
+// Listen for storage changes to handle toggle updates in real-time
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local') {
+    if (changes.autoHumanDetection) {
+      // Remove all Smart Slop badges if disabled
+      if (!changes.autoHumanDetection.newValue) {
+        document.querySelectorAll('.zeroslop-smart-badge').forEach(badge => badge.remove());
+      }
+    }
+  }
+});
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log(`ZeroSlop: Received action ${request.action}`);
@@ -46,6 +58,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     const container = request.tweetId ? null : getTweetContainer(lastRightClickedElement);
     injectBadge(request.tweetId || container, data.fakePercentage || 0, data.upvotes || 0, data.downvotes || 0);
+  } else if (request.action === "adminShowBadge") {
+    const { percentage, tweetId, author } = request.data;
+    console.log(`ZeroSlop Admin: Badge request for tweet ${tweetId} at ${percentage}%`);
+    const container = getTweetContainerByTweetId(tweetId);
+
+    if (!container) {
+      console.warn(`ZeroSlop Admin: Could not find container for tweet ${tweetId}`);
+      return;
+    }
+
+    // Check if author is a known slop factory
+    if (author?.handle) {
+      chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: author.handle }, (result) => {
+        const isSlopFactory = result && (result.shield_type === 'red' || result.shield_type === 'blue');
+        
+        if (isSlopFactory) {
+          // Known slop factory - show slop factory badge with different behavior
+          console.log(`ZeroSlop Admin: ${author.handle} is known slop factory (shield: ${result.shield_type}), showing factory badge`);
+          injectHumanBadge(container, tweetId, author, percentage, true);
+        } else if (percentage <= 15) {
+          // Not a known factory and low AI score - show human badge
+          console.log(`ZeroSlop Admin: Injecting human badge for ${tweetId}`);
+          injectHumanBadge(container, tweetId, author, percentage, false);
+        } else {
+          // High AI score - show AI badge
+          console.log(`ZeroSlop Admin: Injecting AI badge for ${tweetId}`);
+          injectLikelyAIBadge(container, tweetId, author, percentage);
+        }
+      });
+    } else if (percentage <= 15) {
+      // No author info but low AI score - show human badge
+      console.log(`ZeroSlop Admin: Injecting human badge for ${tweetId} (no author)`);
+      injectHumanBadge(container, tweetId, author, percentage, false);
+    } else {
+      // High AI score - show AI badge
+      console.log(`ZeroSlop Admin: Injecting AI badge for ${tweetId}`);
+      injectLikelyAIBadge(container, tweetId, author, percentage);
+    }
   } else if (request.action === "showError") {
     showOverlay(request.message, "error");
   } else if (request.action === "showProfileWarning") {
@@ -79,6 +129,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const info = extractTweetInfo(article);
       if (info.author?.handle === request.handle) {
         injectHighAIBadge(article, request.handle);
+      }
+    });
+  } else if (request.action === "showOrganicSuccess") {
+    injectOrganicBanner(request.handle);
+    injectOrganicHeaderBadge(request.handle);
+    const articles = document.querySelectorAll('article');
+    articles.forEach(article => {
+      const info = extractTweetInfo(article);
+      if (info.author?.handle === request.handle) {
+        injectOrganicBadge(article, request.handle);
       }
     });
   }
@@ -158,6 +218,10 @@ function injectSlopFactoryHeaderBadge(handle) {
 
 function injectSlopFactoryBadge(container, handle) {
   if (!container || container.querySelector('.zerogpt-slopfactory-badge')) return;
+  
+  // Clean up any local "Likely Human" badges if we've now verified this as a factory
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
 
   const badge = document.createElement('div');
   badge.className = 'zerogpt-slopfactory-badge';
@@ -273,6 +337,9 @@ function injectHighAIHeaderBadge(handle) {
 function injectHighAIBadge(container, handle) {
   if (!container || container.querySelector('.zerogpt-highai-badge')) return;
 
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
+
   const badge = document.createElement('div');
   badge.className = 'zerogpt-highai-badge';
   badge.style.cssText = `
@@ -292,6 +359,119 @@ function injectHighAIBadge(container, handle) {
     cursor: help;
   `;
   badge.innerHTML = `🔵 BLUE SHIELD: HIGH AI <span class="v-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
+
+  badge.querySelector('.v-up').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
+    badge.querySelector('.v-up').innerText = '✅';
+  };
+  badge.querySelector('.v-down').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
+    badge.querySelector('.v-down').innerText = '❌';
+  };
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
+
+function injectOrganicBanner(handle) {
+  const existing = document.getElementById('zerogpt-organic-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'zerogpt-organic-banner';
+  banner.style.cssText = `
+    background: #00ba7c;
+    color: #fff;
+    padding: 12px;
+    text-align: center;
+    font-weight: bold;
+    font-size: 14px;
+    position: sticky;
+    top: 0;
+    z-index: 9999;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+  `;
+  banner.innerHTML = `
+    <span>🌿 GREEN SHIELD: VERIFIED HUMAN (${handle})</span>
+    <button id="close-organic-banner" style="background: rgba(255,255,255,0.2); border: none; color: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Dismiss</button>
+  `;
+
+  document.body.prepend(banner);
+  banner.querySelector('#close-organic-banner').onclick = () => banner.remove();
+}
+
+function injectOrganicHeaderBadge(handle) {
+  const userNameHeader = document.querySelector('[data-testid="UserName"]');
+  if (!userNameHeader || userNameHeader.querySelector('.zerogpt-organic-header-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-organic-header-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    margin-top: 4px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #000;
+    border: 2px solid #00ba7c;
+    cursor: help;
+  `;
+  badge.innerHTML = `🌿 GREEN SHIELD: HUMAN <span class="v-up" style="cursor:pointer;margin-left:8px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:4px;">👎</span>`;
+  
+  badge.querySelector('.v-up').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
+    badge.querySelector('.v-up').innerText = '✅';
+  };
+  badge.querySelector('.v-down').onclick = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
+    badge.querySelector('.v-down').innerText = '❌';
+  };
+
+  userNameHeader.appendChild(badge);
+}
+
+function injectOrganicBadge(container, handle) {
+  if (!container || container.querySelector('.zerogpt-organic-badge')) return;
+
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-organic-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #000;
+    border: 1px solid #00ba7c;
+    vertical-align: middle;
+    line-height: 1;
+    height: 16px;
+    cursor: help;
+  `;
+  badge.innerHTML = `🌿 GREEN SHIELD: HUMAN <span class="v-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
 
   badge.querySelector('.v-up').onclick = (e) => {
     e.stopPropagation();
@@ -347,6 +527,9 @@ function injectSuspiciousBanner(handle, reasonTweetId) {
 
 function injectSuspiciousBadge(container, handle) {
   if (!container || container.querySelector('.zerogpt-suspicious-badge')) return;
+
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
 
   const badge = document.createElement('div');
   badge.className = 'zerogpt-suspicious-badge';
@@ -420,6 +603,13 @@ function getTweetContainer(element) {
   if (!container) container = element.closest('[data-testid="cellInnerDiv"]');
   if (!container) container = element.closest('[data-testid="tweet"]');
   return container;
+}
+
+function getTweetContainerByTweetId(tweetId) {
+  if (!tweetId) return null;
+  return document.querySelector(`article[data-zerogpt-tweet-id="${tweetId}"]`) ||
+         document.querySelector(`article a[href*="/status/${tweetId}"]`)?.closest('article') ||
+         document.querySelector(`[data-zerogpt-id="${tweetId}"]`);
 }
 
 function extractTweetInfo(element) {
@@ -556,6 +746,9 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
 
   if (!container || container.querySelector('.zerogpt-badge')) return;
 
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
+
   if (downvotes > upvotes + 2) {
     return;
   }
@@ -613,8 +806,157 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
   handleAutoAction(container, percentage);
 }
 
-function initObservers() {
+function injectHumanBadge(container, tweetId, author, percentage, isSlopFactory = false) {
+  if (!container || container.querySelector('.zerogpt-human-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-human-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #00ba7c;
+    vertical-align: middle;
+    line-height: 1;
+    height: 18px;
+    cursor: help;
+    border: 1px solid rgba(255,255,255,0.2);
+  `;
+  
+  if (isSlopFactory) {
+    badge.innerHTML = `🚩 Slop Factory Tweet ${percentage}% <span class="human-vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="human-vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
+    badge.title = 'This is from a known slop factory. Click 👍 to confirm and add to slop registry.';
+  } else {
+    badge.innerHTML = `🌿 Human-Generated ${percentage}% <span class="human-vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="human-vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
+    badge.title = 'Verified human-generated content. Click 👍 to add to dataset.';
+  }
+
+  badge.querySelector('.human-vote-up').addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const tweetText = container.querySelector('[data-testid="tweetText"]')?.innerText || "";
+
+    if (isSlopFactory) {
+      // Add to slop registry instead of human registry
+      chrome.runtime.sendMessage({
+        action: "manualReport",
+        tweetId: tweetId,
+        text: tweetText,
+        aiScore: percentage,
+        author: author,
+        slopType: "type_slop_factory",
+        shieldType: "shield-red"
+      });
+      console.log(`ZeroSlop Admin: Added slop factory tweet ${tweetId} to registry`);
+    } else {
+      // Add to human registry
+      console.log(`ZeroSlop Admin: Sending voteHuman for tweet ${tweetId}, text length: ${tweetText.length}, author: ${author?.handle}`);
+      chrome.runtime.sendMessage({
+        action: "voteHuman",
+        voteType: "up",
+        tweetId: tweetId,
+        text: tweetText,
+        author: author
+      }, (response) => {
+        console.log(`ZeroSlop Admin: voteHuman response:`, response);
+      });
+      console.log(`ZeroSlop Admin: Added human tweet ${tweetId} to human registry`);
+    }
+
+    badge.querySelector('.human-vote-up').innerText = '✅';
+    badge.querySelector('.human-vote-down').remove();
+  });
+
+  badge.querySelector('.human-vote-down').addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    // Thumbs down: discard, just remove the badge
+    badge.remove();
+  });
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
+
+function injectLikelyAIBadge(container, tweetId, author, percentage) {
+  if (!container || container.querySelector('.zerogpt-likely-ai-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-likely-ai-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #f4212e;
+    vertical-align: middle;
+    line-height: 1;
+    height: 18px;
+    cursor: help;
+    border: 1px solid rgba(255,255,255,0.2);
+  `;
+  badge.innerHTML = `⚠️ Likely AI ${percentage}%`;
+  badge.title = 'This tweet appears to be AI-generated.';
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
+
+function injectSmartSlopBadge(container, labelText = "SMART SLOP SIGNAL", bgColor = "#ffd700", textColor = "#000") {
+  if (!container) return;
+  
+  // Do not inject if ANY other ZeroSlop-related badge is already present
+  const hasOtherBadge = container.querySelector(
+    '.zerogpt-badge, .zerogpt-slopfactory-badge, .zerogpt-highai-badge, .zerogpt-organic-badge, .zerogpt-suspicious-badge, .zerogpt-likely-human-badge, .zeroslop-smart-badge'
+  );
+  if (hasOtherBadge) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zeroslop-smart-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: ${textColor};
+    background-color: ${bgColor};
+    border: 1px solid rgba(0,0,0,0.1);
+    vertical-align: middle;
+    line-height: 1;
+    height: 16px;
+    cursor: help;
+  `;
+  badge.innerHTML = `🟡 ${labelText}`;
+  badge.title = `Smart Slop Guard: Our local model detected structural hallmarks of industrial engagement farming.`;
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
+
+async function initObservers() {
   if (window.zerogptObserver) window.zerogptObserver.disconnect();
+  
+  // Initialize local classifier
+  await ZeroSlopClassifier.load();
 
   const checkContext = () => {
     const path = window.location.pathname;
@@ -656,10 +998,47 @@ function initObservers() {
           container.dataset.zerogptChecked = "true";
           highlightSlopMarkers(container);
           const info = extractTweetInfo(container);
+          
+          // Local Prediction for Automatic Badging
+          if (info.text && info.text.length > 20) {
+            const prediction = ZeroSlopClassifier.predict(info.text);
+            if (prediction) {
+              const { label, probability, probabilities } = prediction;
+
+              // Check if Smart Slop Guard is enabled
+              chrome.storage.local.get(['autoHumanDetection'], (result) => {
+                if (result.autoHumanDetection) {
+                  if (label === 'slop-factory' && probability > 0.70) {
+                    injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
+                  } else if (label === 'ai-generated' && probability > 0.70) {
+                    injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
+                  }
+                }
+              });
+            }
+          }
+
           if (info.tweetId && !info.tweetId.startsWith('local-')) {
-            chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
-            chrome.storage.local.get(['autoScan'], (result) => {
-              if (result.autoScan) chrome.runtime.sendMessage({ action: "autoScanTweet", ...info });
+            // Add data attribute for easy lookup
+            container.setAttribute('data-zerogpt-tweet-id', info.tweetId);
+
+            // Layer 1: Community Shield - check registry (free, enabled by default)
+            chrome.storage.local.get(['communityShield'], (shieldResult) => {
+              if (shieldResult.communityShield !== false) {
+                chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
+              }
+            });
+
+            // Layer 4: Auto-scan with ZeroGPT API (paid, opt-in)
+            chrome.storage.local.get(['autoScan', 'adminOrganicCollection'], (result) => {
+              if (result.autoScan || result.adminOrganicCollection) {
+                chrome.runtime.sendMessage({
+                  action: "autoScanTweet",
+                  text: info.text,
+                  tweetId: info.tweetId,
+                  author: info.author
+                });
+              }
             });
             if (info.author?.handle) {
               chrome.runtime.sendMessage({ action: "checkSuspicious", handle: info.author.handle });
@@ -886,32 +1265,146 @@ async function generateWantedPoster(author, percentage) {
 }
 
 const SLOP_TYPES = [
-  { id: 'type1', name: 'Type 1: Prompt-List Hustle', emoji: '🧵' },
-  { id: 'type2', name: 'Type 2: Passive Income Pitch', emoji: '💰' },
-  { id: 'type3', name: 'Type 3: Social Proof Fabrication', emoji: '🧪' },
-  { id: 'type4', name: 'Type 4: Evergreen Re-publisher', emoji: '🔄' },
-  { id: 'type5', name: 'Type 5: Personal Transformation', emoji: '🦋' },
+  { 
+    id: 'type_psych_burnout', 
+    name: 'Burnout Exploit ($10k/mo)', 
+    emoji: '🔥',
+    description: 'Targets your exhaustion by selling a "magic button" solution to your problems.'
+  },
+  { 
+    id: 'type_psych_imposter', 
+    name: 'Imposter Panacea (No Skill)', 
+    emoji: '🎓',
+    description: 'Lowers the barrier to entry to make complex success seem easy for anyone.'
+  },
+  { 
+    id: 'type_psych_paranoia', 
+    name: 'Peer Paranoia (Get Ahead)', 
+    emoji: '🕵️',
+    description: 'Weaponizes the fear that your peers are getting ahead of you.'
+  },
+  { 
+    id: 'type_psych_guilt', 
+    name: 'Execution Guilt (7 Prompts)', 
+    emoji: '✍️',
+    description: 'Makes you feel like your lack of progress is just due to missing a "secret" prompt.'
+  },
+  { 
+    id: 'type_algo_overload', 
+    name: 'Cognitive Overload (20 Tools)', 
+    emoji: '🧠',
+    description: 'Overwhelms you with massive data dumps to force a "Save/Bookmark" action.'
+  },
+  { 
+    id: 'type_algo_consensus', 
+    name: 'Manufactured Consensus (Reply GPT)', 
+    emoji: '🤖',
+    description: 'Demands a specific keyword comment to trick the algorithm into seeing organic engagement.'
+  },
+  { 
+    id: 'type_algo_curiosity', 
+    name: 'Curiosity Gap (Show More)', 
+    emoji: '🕳️',
+    description: 'Hides the payload behind a "Show more" button to artificially increase dwell time.'
+  },
+  { 
+    id: 'type_struct_math', 
+    name: 'Math-Washing (Tool+Time=$)', 
+    emoji: '🧮',
+    description: 'Uses absurd, oversimplified equations to bypass your logical skepticism.'
+  },
+  { 
+    id: 'type_struct_launder', 
+    name: 'Institutional Launder (Harvard)', 
+    emoji: '🏛️',
+    description: 'Borrows the credibility of elite institutions to make generic tools seem high-end.'
+  },
+  { 
+    id: 'type_struct_beta', 
+    name: 'Beta-Tester Loophole', 
+    emoji: '🧪',
+    description: 'Uses "in testing" claims to brag about fake profits without making legal guarantees.'
+  },
+  { 
+    id: 'type_visual_hijack', 
+    name: 'IP Hijacking (Spider-Man)', 
+    emoji: '🕷️',
+    description: 'Uses pop-culture icons to distract you from uncanny AI artifacts and melting backgrounds.'
+  },
+  { id: 'type_organic_human', name: 'Verified Organic (Human)', emoji: '🌿', description: 'High-quality, organic human content. Use this to help train the model on what NOT to catch.' },
+  ];
+
+const UNIFIED_SLOP_RULES = [
+  // --- Hard Blocks (Definitive Slop) ---
+  { regex: /\bfollow\s+(me|@\w+)\b/gi, label: "Engagement Gate", description: "Clear signal of industrial audience capture.", points: 5 },
+  { regex: /must follow/gi, label: "Engagement Gate", description: "Forced following to bypass algorithmic filters.", points: 5 },
+  { regex: /\bcomment\b.{0,30}\bto (get|receive|join|access)\b/gi, label: "Comment Bait", description: "Tricks the algorithm into seeing organic engagement.", points: 5 },
+  { regex: /\b(retweet|like\s+and\s+retweet)\b/gi, label: "Engagement Loop", description: "The most basic form of algorithmic currency extraction.", points: 5 },
+  { regex: /\bbookmark\s+(this|it|now|thread|post)\b/gi, label: "Save/Bookmark Bait", description: "Exploits Miller's Law by overloading you with info to process now.", points: 5 },
+  { regex: /\bsave\s+this\b/gi, label: "Save/Bookmark Bait", description: "Designed to increase post dwell-time and algorithmic 'saves'.", points: 5 },
+  { regex: /\b(dm\s+me|dm\s+for|send\s+me\s+(a\s+)?dm)\b/gi, label: "Direct-Funnel Loop", description: "Moves the extraction into private messages to bypass public scrutiny.", points: 5 },
+  { regex: /\$[\d,]+\+?\s*\/\s*(mo|month|day|week|hr|hour|year)/gi, label: "Income Claim", description: "Unverified financial promise designed to bypass logical skepticism.", points: 5 },
+  { regex: /\$[\d,]+[k]?\s+per\s+(mo|month|day|week|hour)/gi, label: "Income Claim", description: "Specific, high-value financial hooks used by slop factories.", points: 5 },
+  { regex: /\$[\d,]+.{0,40}(replac|instead of|consultant|lawyer|doctor|agency|degree|analyst|designer|copywriter)/gi, label: "Income Claim", description: "Claims that AI can replace high-value human professional services.", points: 5 },
+  { regex: /\b(make|earn|generate|earning|making)\b.{0,20}\$[\d,]+/gi, label: "Income Claim", description: "Direct promises of unverified monetary gain.", points: 5 },
+  { regex: /\b(money machine|cash machine|print money|income machine)\b/gi, label: "Hustle Buzzword", description: "Dehumanizes wealth generation into a mechanical, low-effort process.", points: 5 },
+  { regex: /\bside\s+(hustle|income)\b/gi, label: "Aspirational Trap", description: "Targets workers with a fantasy of escaping the system.", points: 5 },
+  { regex: /\bdata entry\b/gi, label: "Hustle Buzzword", description: "A common 'passive income' trope used to farm engagement.", points: 5 },
+  { regex: /\bhere are\s+[1-9]\d*\b/gi, label: "List Formula", description: "Uses specific numbers to hack your brain's internal spam filter.", points: 5 },
+  { regex: /\b[1-9]\d*\s+prompts?\b/gi, label: "Prompt List Formula", description: "Mass-produced prompt collections with low actual utility.", points: 5 },
+  { regex: /\b[1-9]\d*\s+(tools?|hacks?|tricks?|ways?|tips?|secrets?|mistakes?|steps?)\b/gi, label: "List Formula", description: "Designed to provide 'value' that is just below the fold.", points: 5 },
+  { regex: /\b(use these|try these|steal these|copy these)\b.{0,20}\b(prompts?|tools?|tricks?)\b/gi, label: "List Formula", description: "Encourages low-effort copy-pasting over genuine learning.", points: 5 },
+  { regex: /\bact (as|like) (a |an )?(professional|expert|senior|world-class|harvard)/gi, label: "Institutional Launder", description: "Steals the credibility of elite brands to launder low-quality content.", points: 5 },
+  { regex: /\bstep[\s-]by[\s-]step\b/gi, label: "List Formula", description: "Makes complex technology seem simple for the unqualified.", points: 5 },
+  { regex: /\b[1-9]\d*\+?\s*free\s+(ai\s+)?courses?\b/gi, label: "Lead Magnet", description: "The 'value' is bait for a downstream product or newsletter.", points: 5 },
+  // BREAKING: Only flag when followed by income/tool/free claims (not genuine news)
+  { regex: /\bBREAKING\b.{0,80}(free|prompts?|\$[\d,]+|replac|for free|tool|hack|secret|cheat)/gi, label: "Clickbait Opener", description: "Artificially creates urgency to capture your initial scroll-speed.", points: 5 },
+  { regex: /\bGOODBYE\b/g, label: "Clickbait Opener", description: "Uses finality to create a curiosity gap.", points: 5 },
+  { regex: /\bR\.?I\.?P\.?\b/gi, label: "Clickbait Opener", description: "Uses fake finality to harvest engagement.", points: 5 },
+  { regex: /\bSTOP (telling|using|doing|saying)\b/g, label: "Clickbait Opener", description: "Weaponizes authority to command your attention.", points: 5 },
+  { regex: /\bCANCELLED\b.{0,60}(chatgpt|netflix|spotify|prime|subscription)/gi, label: "Clickbait Opener", description: "Exploits the fear of missing out on a 'magic button' solution.", points: 5 },
+  { regex: /\b(most people don.t know|nobody (talks|is talking) about|very few (know|people)|hardly anyone|95% of people|99% of people)\b/gi, label: "Manufactured Consensus", description: "Weaponizes the fear that your peers are getting ahead of you.", points: 5 },
+  { regex: /\bfor free\b/gi, label: "Lead Magnet", description: "Content is bait for a course blueprint or tool referral link.", points: 5 },
+  { regex: /\bfaceless\b/gi, label: "Hustle Buzzword", description: "Promotes industrial content production without genuine intent.", points: 5 },
+  { regex: /passive income/gi, label: "Hustle Buzzword", description: "Bait for a course blueprint or tool referral link.", points: 5 },
+  { regex: /\bno (experience|skills?|coding|degree|team|budget|camera|luck)\b/gi, label: "Hustle Buzzword", description: "Lowers your critical guard by making success seem frictionless.", points: 5 },
+  { regex: /\bzero to.{0,30}(income|money|\$)\b/gi, label: "Aspirational Trap", description: "The transformation story applied to a product or course funnel.", points: 5 },
+  { regex: /\b(forget|ditch|quit|goodbye|replace)\s+chatgpt\b/gi, label: "Clickbait Opener", description: "Claims that all human work is replaceable by current AI wrappers.", points: 5 },
+  { regex: /\b(giveaway|giving away)\b/gi, label: "Fake Giveaway", description: "Often a front for bot-network expansion.", points: 5 },
+  { regex: /\b(prize|reward).{0,30}(follow|retweet|like|comment|enter)/gi, label: "Engagement Gate", description: "Engagement wall to harvest your account information.", points: 5 },
+  { regex: /\bfree for \d+\s*hours?\b/gi, label: "Scarcity Bait", description: "Exploits the fear of missing out by creating fake time-pressure.", points: 5 },
+  { regex: /\b(limited (spots?|seats?)|only \d+ spots?)\b/gi, label: "Scarcity Bait", description: "Uses specific, random numbers to make a scam look legitimate.", points: 5 },
+  { regex: /\b(paid courses?).{0,30}free\b/gi, label: "Lead Magnet", description: "Fake pricing anchor to make slop look like a high-value gift.", points: 5 },
+  { regex: /\ball paid.{0,20}free\b/gi, label: "Lead Magnet", description: "Designed to bypass your logical skepticism with 'free' value.", points: 5 },
+  { regex: /\b(blueprint|masterclass|cheatsheet|playbook).{0,40}(free|get|dm|comment|follow)\b/gi, label: "Course Funnel", description: "Bait for a downstream product or tool referral link.", points: 5 },
+  { regex: /\b(course|ebook|pdf).{0,40}\$[\d,]+\b/gi, label: "Course Funnel", description: "Direct monetization of engagement via informational products.", points: 5 },
+  { regex: /\bgrok.{0,20}imagine\b/gi, label: "AI Promo", description: "Promotes AI tools using industrial engagement farming.", points: 5 },
+  { regex: /\b(apob|pollo ai|seedance|heygen|synthesia)\b/gi, label: "AI Promo", description: "Specific tool promotions commonly found in slop networks.", points: 5 },
+  { regex: /\bai\s+ugc\b/gi, label: "AI Promo", description: "Industrial content production disguised as organic user content.", points: 5 },
+  { regex: /\bupload.{0,20}(photo|video|image).{0,40}(generate|create|make|turn into)\b/gi, label: "AI Promo", description: "Promotes AI creation tools through low-effort templates.", points: 5 },
+  { regex: /\b(stop|still)\s+paying\s+for\b.{0,30}(storage|icloud|gmail|subscription)/gi, label: "Subscription Hook", description: "Targets your exhaustion with recurring fees to sell a 'magic button' solution.", points: 5 },
+  { regex: /\bI\s+(found|discovered)\s+a\s+(way|secret|tool)\b/gi, label: "Curiosity Gap", description: "Claims of secret knowledge used to farm engagement.", points: 5 },
+  { regex: /\b(I\s+)?hope\s+this\s+helps\s+you\s*↓/gi, label: "Engagement Ending", description: "Standardized call-to-action used in slop threads.", points: 5 },
+  { regex: /\bstop\s+(declining|rejecting)\s+spam\s+calls\b/gi, label: "Fear-Based Hook", description: "Targets common annoyances with unverified solutions.", points: 5 },
+  { regex: /\bif\s+your\s+iphone\s+gets\s+stolen\b/gi, label: "Fear-Based Hook", description: "Exploits anxiety about device security to extract attention.", points: 5 },
+  { regex: /\b(most|9[59]% of)\s+(developers|students|people)\s+are\s+using\b.{0,30}\bwrong\b/gi, label: "Competence Gap", description: "Weaponizes the fear that you are falling behind your peers.", points: 5 },
+  { regex: /\bsomeone\s+(built|leaked|compiled|just)\s+a\s+(tool|skill|system|repo|skill)\b/gi, label: "Third-Party Validation", description: "Uses fake institutional credibility to launder low-quality content.", points: 5 },
+  { regex: /\b(your|a)\s+\$[\d,]+\s+camera\b.{0,50}\blosing\b/gi, label: "Comparison Hook", description: "Uses absurd gear comparisons to create scroll-stopping curiosity.", points: 5 },
+  { regex: /\b(vibe\s+coding|claude\s+code|openclaw)\b/gi, label: "Trending Slop", description: "High-volume industrial farming of current AI keywords.", points: 5 },
+  { regex: /\b(don.t|do\s+not)\s+change\s+the\s+iphone\b/gi, label: "Fear-Based Hook", description: "Uses fear of tech obsolescence to capture your scroll-speed.", points: 5 },
+  { regex: /\bbest\s+for\s+(logic|writing|research|video)\b/gi, label: "Comparison Table", description: "Standardized AI model comparison templates used in slop.", points: 5 },
+
+  // --- Soft Signals (Subtler Markers) ---
+  { regex: /[\u{1D400}-\u{1D7FF}]/gu, label: "Bold Unicode Spam", description: "Uses custom characters to bypass filters and stand out visually.", points: 1 },
+  { regex: /(changed my life|show more|read on|curiosity)/gi, label: "Curiosity Gap", description: "Exploits Loewenstein's Information Gap Theory to increase dwell time.", points: 0.5 },
+  { regex: /\+.{0,20}\+.{0,20}=/g, label: "Math-Washing", description: "Weaponizes the Complexity Fallacy with oversimplified equations.", points: 1 }
 ];
 
 const SLOP_HEURISTICS = {
-  hardBlocks: [
-    { regex: /follow.{0,40}(dm|send)/gi, label: "Follow-for-DM Loop" },
-    { regex: /comment ["']?\w+/gi, label: "Comment Trigger" },
-    { regex: /free for \d+ (hour|day|hr)/gi, label: "Scarcity Bait" },
-    { regex: /must (follow|be following)/gi, label: "Gated Content" },
-    { regex: /\$[\d,]+.{0,15}(per day|per month|\/day|\/month|\/week|\/hr)/gi, label: "Income Claim" },
-    { regex: /(giveaway|cash giveaway|paypal cash)/gi, label: "Fake Giveaway" },
-    { regex: /faceless (youtube|channel)/gi, label: "YouTube Hustle" },
-    { regex: /normally.{0,15}\$/gi, label: "False Pricing" }
-  ],
-  softSignals: [
-    { regex: /(like).{0,30}(repost|rt|retweet)/gi, points: 1, label: "Engagement Loop" },
-    { regex: /^breaking:/gi, points: 1, label: "Clickbait Opener" },
-    { regex: /no (coding|skills|experience|face|camera|editing)/gi, points: 1, label: "Hustle Buzzwords" },
-    { regex: /[\u{1D400}-\u{1D7FF}]/gu, points: 1, label: "Bold Unicode Spam" },
-    { regex: /(save (this|for later)|bookmark this)/gi, points: 0.5, label: "Save/Bookmark Bait" }
-  ]
+  hardBlocks: UNIFIED_SLOP_RULES.filter(r => r.points >= 5),
+  softSignals: UNIFIED_SLOP_RULES.filter(r => r.points < 5)
 };
+
 
 function highlightSlopMarkers(element) {
   if (!element) return;
@@ -929,7 +1422,7 @@ function highlightSlopMarkers(element) {
       if (h.regex.test(text)) {
         html = html.replace(h.regex, (match) => {
           found = true; score += 5;
-          return `<span style="background: rgba(244, 33, 46, 0.25); border-bottom: 2px solid #f4212e; color: #f4212e; font-weight: bold;" title="HARD BLOCK: ${h.label}">${match}</span>`;
+          return `<span style="background: rgba(244, 33, 46, 0.25); border-bottom: 2px solid #f4212e; color: #f4212e; font-weight: bold; cursor: help;" title="${h.label}: ${h.description}">${match}</span>`;
         });
       }
     });
@@ -937,7 +1430,7 @@ function highlightSlopMarkers(element) {
       if (s.regex.test(text)) {
         html = html.replace(s.regex, (match) => {
           found = true; score += s.points;
-          return `<span style="background: rgba(255, 215, 0, 0.15); border-bottom: 2px dashed #ffd700; color: #ffd700;" title="SOFT SIGNAL: ${s.label} (+${s.points} pts)">${match}</span>`;
+          return `<span style="background: rgba(255, 215, 0, 0.15); border-bottom: 2px dashed #ffd700; color: #ffd700; cursor: help;" title="${s.label}: ${s.description}">${match}</span>`;
         });
       }
     });
@@ -1168,9 +1661,12 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
         let suggestedType = "";
         if (info?.text) {
           const text = info.text.toLowerCase();
-          if (text.includes('thread') || text.includes('🧵')) suggestedType = "type1";
-          else if (text.includes('passive income') || text.includes('faceless')) suggestedType = "type2";
-          else if (text.includes('my cousin') || text.includes('replies in')) suggestedType = "type3";
+          if (text.includes('$10k') || text.includes('10,000') || text.includes('60 minutes')) suggestedType = "type_psych_burnout";
+          else if (text.includes('no skill') || text.includes('no luck')) suggestedType = "type_psych_imposter";
+          else if (text.includes('20 tools') || text.includes('10 tools')) suggestedType = "type_algo_overload";
+          else if (text.includes('comment') || text.includes('reply')) suggestedType = "type_algo_consensus";
+          else if (text.includes('harvard') || text.includes('google') || text.includes('mckinsey')) suggestedType = "type_struct_launder";
+          else if (text.includes('thread') || text.includes('🧵')) suggestedType = "type_algo_curiosity";
         }
         const reportBtn = document.createElement('button');
         reportBtn.innerText = '🚩 Report as AI Slop';
@@ -1185,17 +1681,32 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
           toggleDetails.innerText = detailsDrawer.style.display === 'none' ? "Add Details (Optional) ▾" : "Hide Details ▴";
         };
         const slopSelect = document.createElement('select');
-        slopSelect.style.cssText = "width: 100%; padding: 5px; border-radius: 6px; border: 1px solid #cfd9de; font-size: 0.8rem; margin-bottom: 10px;";
+        slopSelect.style.cssText = "width: 100%; padding: 5px; border-radius: 6px; border: 1px solid #cfd9de; font-size: 0.8rem; margin-bottom: 6px;";
+        const descBox = document.createElement('div');
+        descBox.style.cssText = "font-size: 0.75rem; color: #536471; background: #fff; border: 1px solid #e1e8ed; padding: 8px; border-radius: 6px; margin-bottom: 10px; line-height: 1.3; display: none;";
         const defaultOpt = document.createElement('option');
         defaultOpt.value = ""; defaultOpt.text = "General Slop";
         slopSelect.appendChild(defaultOpt);
         SLOP_TYPES.forEach(t => {
           const opt = document.createElement('option');
           opt.value = t.id; opt.text = `${t.emoji} ${t.name}`;
+          opt.title = t.description; // Tooltip on hover
           if (t.id === suggestedType) opt.selected = true;
           slopSelect.appendChild(opt);
         });
+        const updateDesc = () => {
+          const selected = SLOP_TYPES.find(t => t.id === slopSelect.value);
+          if (selected) {
+            descBox.innerText = selected.description;
+            descBox.style.display = 'block';
+          } else {
+            descBox.style.display = 'none';
+          }
+        };
+        slopSelect.onchange = updateDesc;
+        if (suggestedType) updateDesc();
         detailsDrawer.appendChild(slopSelect);
+        detailsDrawer.appendChild(descBox);
         const createCheck = (id, label) => {
           const div = document.createElement('label');
           div.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 0.75rem; margin-bottom: 4px; cursor: pointer;";
@@ -1248,9 +1759,31 @@ function showOverlay(message, type = "info", currentAiScore = 0) {
             reportBtn.disabled = true; toggleDetails.remove(); detailsDrawer.remove();
           }
         };
+
+        const safeBtn = document.createElement('button');
+        safeBtn.innerText = '🌿 Mark as Organic (Human)';
+        safeBtn.style.cssText = `background: #00ba7c; color: white; border: none; padding: 12px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.95rem; margin-top: 5px;`;
+        safeBtn.onclick = () => {
+          if (info) {
+            chrome.runtime.sendMessage({
+              action: "manualReport",
+              aiScore: 0,
+              slopType: "type_organic_human",
+              shieldType: "shield-green",
+              ...info
+            });
+            safeBtn.innerText = '✅ Verified Organic';
+            safeBtn.disabled = true;
+            if (reportBtn) reportBtn.remove();
+            toggleDetails.remove();
+            detailsDrawer.remove();
+          }
+        };
+
         btnContainer.appendChild(toggleDetails);
         btnContainer.appendChild(detailsDrawer);
         btnContainer.appendChild(reportBtn);
+        btnContainer.appendChild(safeBtn);
       }
       const posterBtn = document.createElement('button');
       posterBtn.innerText = '🖼️ Generate Wanted Poster';

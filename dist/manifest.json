@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ZeroSlop: ZeroGPT Tweet Checker",
-  "version": "1.4.0",
-  "description": "Instantly detect AI-generated tweets on Twitter (X) using the ZeroGPT Business API.",
+  "name": "ZeroSlop: Community-Powered AI Detector for X",
+  "version": "1.4.1",
+  "description": "The forensic shield for your timeline. Instantly detect, highlight, and zap AI-generated 'slop' and bot networks on X (Twitter).",
   "permissions": [
     "storage",
     "contextMenus"
@@ -36,7 +36,13 @@
         "https://twitter.com/*",
         "https://x.com/*"
       ],
-      "js": ["content.js"]
+      "js": ["classifier.js", "content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["model_weights.json"],
+      "matches": ["https://twitter.com/*", "https://x.com/*"]
     }
   ]
 }

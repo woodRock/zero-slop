@@ -3,6 +3,8 @@ import json
 import re
 import pandas as pd
 import numpy as np
+import os
+from dotenv import load_dotenv
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -11,9 +13,13 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score, balanced_accuracy_score
 
+# Load environment variables
+load_dotenv()
+
 # Configuration from your background.js
 FIREBASE_PROJECT_ID = "zero-slop"
 FIREBASE_API_KEY = "AIzaSyDDx5ZbgWcgsKxsP78EubqyWRHL9yxdXec"
+RESEARCHER_PASSWORD = os.getenv('RESEARCHER_PASSWORD', 'zeroslop-research-2026')
 
 def fetch_registry_data():
     print("Fetching latest data from ZeroSlop Registry...")
@@ -34,7 +40,9 @@ def fetch_registry_data():
         r'\b(use these|try these|steal these|copy these)\b.{0,20}\b(prompts?|tools?|tricks?)\b',
         r'\bact (as|like) (a |an )?(professional|expert|senior|world-class|harvard)',
         r'\bstep[\s-]by[\s-]step\b', r'\b[1-9]\d*\+?\s*free\s+(ai\s+)?courses?\b',
-        r'\bBREAKING\b', r'\bGOODBYE\b', r'\bR\.?I\.?P\.?\b', r'\bSTOP (telling|using|doing|saying)\b',
+        # BREAKING: Only match when followed by income/tool/free claims (not genuine news)
+        r'\bBREAKING\b.{0,80}(free|prompts?|\$[\d,]+|replac|for free|tool|hack|secret|cheat)',
+        r'\bGOODBYE\b', r'\bR\.?I\.?P\.?\b', r'\bSTOP (telling|using|doing|saying)\b',
         r'\bCANCELLED\b.{0,60}(chatgpt|netflix|spotify|prime|subscription)',
         r'\b(most people don.t know|nobody (talks|is talking) about|very few (know|people)|hardly anyone|95% of people|99% of people)\b',
         r'\bfor free\b', r'\bfaceless\b', r'passive income',
@@ -111,6 +119,44 @@ def fetch_registry_data():
             break
             
     print(f"Downloaded {len(all_rows)} samples from the registry.")
+    return pd.DataFrame(all_rows)
+
+def fetch_human_registry_data():
+    print("Fetching verified human tweets from human_registry...")
+    all_rows = []
+    page_token = None
+
+    while True:
+        url = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/human_registry?key={FIREBASE_API_KEY}&pageSize=1000"
+        if page_token:
+            url += f"&pageToken={page_token}"
+
+        response = requests.get(url)
+        if not response.ok:
+            error_data = response.json() if response.text else {}
+            if response.status_code == 403:
+                print(f"Warning: Permission denied for human_registry (403). This is expected if no human tweets have been verified yet.")
+                print(f"Error details: {error_data}")
+            else:
+                print(f"Error fetching human registry: {response.text}")
+            break
+
+        data = response.json()
+        documents = data.get('documents', [])
+
+        for doc in documents:
+            fields = doc.get('fields', {})
+            text = fields.get('text', {}).get('stringValue', '')
+            label = fields.get('label', {}).get('stringValue', 'organic-human')
+
+            if text:
+                all_rows.append({'Text': text, 'AI Score': 0, 'Label': label})
+
+        page_token = data.get('nextPageToken')
+        if not page_token:
+            break
+
+    print(f"Downloaded {len(all_rows)} verified human samples.")
     return pd.DataFrame(all_rows)
 
 def train_and_export(df):
@@ -198,20 +244,35 @@ def train_and_export(df):
 
 if __name__ == "__main__":
     registry_df = fetch_registry_data()
-    
+    human_df = fetch_human_registry_data()
+
     # Mix in the latest corrected dataset to ensure stability
     try:
         local_df = pd.read_csv('zeroslop_dataset_2026-03-24.csv')
-        if registry_df is not None and not registry_df.empty:
-            combined_df = pd.concat([registry_df, local_df]).drop_duplicates(subset=['Text'])
+        
+        # Combine all data sources: registry + human_registry + local CSV
+        all_dfs = [df for df in [registry_df, human_df, local_df] if df is not None and not df.empty]
+        
+        if all_dfs:
+            combined_df = pd.concat(all_dfs).drop_duplicates(subset=['Text'])
         else:
-            combined_df = local_df
-            
+            combined_df = pd.DataFrame()
+
         print(f"Total dataset size after merge: {len(combined_df)}")
+        
+        # Print label distribution
+        if not combined_df.empty:
+            print("\nLabel distribution:")
+            print(combined_df['Label'].value_counts())
+        
         train_and_export(combined_df)
     except Exception as e:
         print(f"Error loading local CSV: {e}")
-        if registry_df is not None and not registry_df.empty:
-            train_and_export(registry_df)
+        # Fallback to registry + human_registry only
+        all_dfs = [df for df in [registry_df, human_df] if df is not None and not df.empty]
+        if all_dfs:
+            combined_df = pd.concat(all_dfs).drop_duplicates(subset=['Text'])
+            print(f"Training with {len(combined_df)} samples from Firestore only")
+            train_and_export(combined_df)
         else:
             print("No data available to train.")

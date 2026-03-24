@@ -41,11 +41,45 @@ ZeroSlop is built for performance and privacy:
 
 ## 📥 Installation
 
+### Chrome Web Store (Recommended)
+**Coming soon!** Once approved, you can install directly from the [Chrome Web Store](https://chrome.google.com/webstore).
+
+### Manual Installation (Development)
 1. Clone this repository.
 2. Open Chrome and go to `chrome://extensions/`.
 3. Enable **Developer mode**.
-4. Click **Load unpacked** and select this folder.
-5. (Coming Soon) Available on the Chrome Web Store.
+4. Click **Load unpacked** and select the `dist/` folder.
+
+### Build from Source
+```bash
+# Install dependencies (optional, for testing)
+npm install
+
+# Create release package manually
+cd dist
+zip -r ../zero-slop-VERSION.zip manifest.json background.js content.js classifier.js popup.html popup.js model_weights.json icons/
+```
+
+## 📦 Chrome Web Store Submission
+
+To submit a new version to the Chrome Web Store:
+
+1. **Update version** in `manifest.json` and `package.json`
+2. **Create ZIP package:**
+   ```bash
+   cd dist
+   zip -r ../zero-slop-VERSION.zip manifest.json background.js content.js classifier.js popup.html popup.js model_weights.json icons/
+   ```
+3. **Upload** to [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole)
+4. **Deploy Firestore rules:**
+   ```bash
+   firebase deploy --only firestore:rules
+   ```
+
+### Required Store Assets
+- **Promo images:** Small (440x280), Large (920x680)
+- **Screenshots:** At least 1 (1280x800 recommended)
+- **Privacy policy:** Use `PRIVACY.md` content
 
 ---
 

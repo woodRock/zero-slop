@@ -8,6 +8,18 @@ document.addEventListener('contextmenu', (event) => {
 // Global to store the last detection result for the current tweet/profile
 let currentOverlayInfo = null;
 
+// Listen for storage changes to handle toggle updates in real-time
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local') {
+    if (changes.autoHumanDetection) {
+      // Remove all Smart Slop badges if disabled
+      if (!changes.autoHumanDetection.newValue) {
+        document.querySelectorAll('.zeroslop-smart-badge').forEach(badge => badge.remove());
+      }
+    }
+  }
+});
+
 // Listen for messages from background script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   console.log(`ZeroSlop: Received action ${request.action}`);
@@ -46,6 +58,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     
     const container = request.tweetId ? null : getTweetContainer(lastRightClickedElement);
     injectBadge(request.tweetId || container, data.fakePercentage || 0, data.upvotes || 0, data.downvotes || 0);
+  } else if (request.action === "adminShowBadge") {
+    const { percentage, tweetId, author } = request.data;
+    console.log(`ZeroSlop Admin: Badge request for tweet ${tweetId} at ${percentage}%`);
+    const container = getTweetContainerByTweetId(tweetId);
+
+    if (!container) {
+      console.warn(`ZeroSlop Admin: Could not find container for tweet ${tweetId}`);
+      return;
+    }
+
+    // Check if author is a known slop factory
+    if (author?.handle) {
+      chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: author.handle }, (result) => {
+        const isSlopFactory = result && (result.shield_type === 'red' || result.shield_type === 'blue');
+        
+        if (isSlopFactory) {
+          // Known slop factory - show slop factory badge with different behavior
+          console.log(`ZeroSlop Admin: ${author.handle} is known slop factory (shield: ${result.shield_type}), showing factory badge`);
+          injectHumanBadge(container, tweetId, author, percentage, true);
+        } else if (percentage <= 15) {
+          // Not a known factory and low AI score - show human badge
+          console.log(`ZeroSlop Admin: Injecting human badge for ${tweetId}`);
+          injectHumanBadge(container, tweetId, author, percentage, false);
+        } else {
+          // High AI score - show AI badge
+          console.log(`ZeroSlop Admin: Injecting AI badge for ${tweetId}`);
+          injectLikelyAIBadge(container, tweetId, author, percentage);
+        }
+      });
+    } else if (percentage <= 15) {
+      // No author info but low AI score - show human badge
+      console.log(`ZeroSlop Admin: Injecting human badge for ${tweetId} (no author)`);
+      injectHumanBadge(container, tweetId, author, percentage, false);
+    } else {
+      // High AI score - show AI badge
+      console.log(`ZeroSlop Admin: Injecting AI badge for ${tweetId}`);
+      injectLikelyAIBadge(container, tweetId, author, percentage);
+    }
   } else if (request.action === "showError") {
     showOverlay(request.message, "error");
   } else if (request.action === "showProfileWarning") {
@@ -555,6 +605,13 @@ function getTweetContainer(element) {
   return container;
 }
 
+function getTweetContainerByTweetId(tweetId) {
+  if (!tweetId) return null;
+  return document.querySelector(`article[data-zerogpt-tweet-id="${tweetId}"]`) ||
+         document.querySelector(`article a[href*="/status/${tweetId}"]`)?.closest('article') ||
+         document.querySelector(`[data-zerogpt-id="${tweetId}"]`);
+}
+
 function extractTweetInfo(element) {
   const container = getTweetContainer(element);
   let text = "";
@@ -749,6 +806,116 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
   handleAutoAction(container, percentage);
 }
 
+function injectHumanBadge(container, tweetId, author, percentage, isSlopFactory = false) {
+  if (!container || container.querySelector('.zerogpt-human-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-human-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #00ba7c;
+    vertical-align: middle;
+    line-height: 1;
+    height: 18px;
+    cursor: help;
+    border: 1px solid rgba(255,255,255,0.2);
+  `;
+  
+  if (isSlopFactory) {
+    badge.innerHTML = `🚩 Slop Factory Tweet ${percentage}% <span class="human-vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="human-vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
+    badge.title = 'This is from a known slop factory. Click 👍 to confirm and add to slop registry.';
+  } else {
+    badge.innerHTML = `🌿 Human-Generated ${percentage}% <span class="human-vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="human-vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
+    badge.title = 'Verified human-generated content. Click 👍 to add to dataset.';
+  }
+
+  badge.querySelector('.human-vote-up').addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const tweetText = container.querySelector('[data-testid="tweetText"]')?.innerText || "";
+
+    if (isSlopFactory) {
+      // Add to slop registry instead of human registry
+      chrome.runtime.sendMessage({
+        action: "manualReport",
+        tweetId: tweetId,
+        text: tweetText,
+        aiScore: percentage,
+        author: author,
+        slopType: "type_slop_factory",
+        shieldType: "shield-red"
+      });
+      console.log(`ZeroSlop Admin: Added slop factory tweet ${tweetId} to registry`);
+    } else {
+      // Add to human registry
+      console.log(`ZeroSlop Admin: Sending voteHuman for tweet ${tweetId}, text length: ${tweetText.length}, author: ${author?.handle}`);
+      chrome.runtime.sendMessage({
+        action: "voteHuman",
+        voteType: "up",
+        tweetId: tweetId,
+        text: tweetText,
+        author: author
+      }, (response) => {
+        console.log(`ZeroSlop Admin: voteHuman response:`, response);
+      });
+      console.log(`ZeroSlop Admin: Added human tweet ${tweetId} to human registry`);
+    }
+
+    badge.querySelector('.human-vote-up').innerText = '✅';
+    badge.querySelector('.human-vote-down').remove();
+  });
+
+  badge.querySelector('.human-vote-down').addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    // Thumbs down: discard, just remove the badge
+    badge.remove();
+  });
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
+
+function injectLikelyAIBadge(container, tweetId, author, percentage) {
+  if (!container || container.querySelector('.zerogpt-likely-ai-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'zerogpt-likely-ai-badge';
+  badge.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-left: 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    background-color: #f4212e;
+    vertical-align: middle;
+    line-height: 1;
+    height: 18px;
+    cursor: help;
+    border: 1px solid rgba(255,255,255,0.2);
+  `;
+  badge.innerHTML = `⚠️ Likely AI ${percentage}%`;
+  badge.title = 'This tweet appears to be AI-generated.';
+
+  const timeElement = container.querySelector('time');
+  if (timeElement && timeElement.parentNode) {
+    timeElement.parentNode.appendChild(badge);
+  }
+}
+
 function injectSmartSlopBadge(container, labelText = "SMART SLOP SIGNAL", bgColor = "#ffd700", textColor = "#000") {
   if (!container) return;
   
@@ -837,19 +1004,41 @@ async function initObservers() {
             const prediction = ZeroSlopClassifier.predict(info.text);
             if (prediction) {
               const { label, probability, probabilities } = prediction;
-              
-              if (label === 'slop-factory' && probability > 0.70) {
-                injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
-              } else if (label === 'ai-generated' && probability > 0.70) {
-                injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
-              }
+
+              // Check if Smart Slop Guard is enabled
+              chrome.storage.local.get(['autoHumanDetection'], (result) => {
+                if (result.autoHumanDetection) {
+                  if (label === 'slop-factory' && probability > 0.70) {
+                    injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
+                  } else if (label === 'ai-generated' && probability > 0.70) {
+                    injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
+                  }
+                }
+              });
             }
           }
 
           if (info.tweetId && !info.tweetId.startsWith('local-')) {
-            chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
-            chrome.storage.local.get(['autoScan'], (result) => {
-              if (result.autoScan) chrome.runtime.sendMessage({ action: "autoScanTweet", ...info });
+            // Add data attribute for easy lookup
+            container.setAttribute('data-zerogpt-tweet-id', info.tweetId);
+
+            // Layer 1: Community Shield - check registry (free, enabled by default)
+            chrome.storage.local.get(['communityShield'], (shieldResult) => {
+              if (shieldResult.communityShield !== false) {
+                chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
+              }
+            });
+
+            // Layer 4: Auto-scan with ZeroGPT API (paid, opt-in)
+            chrome.storage.local.get(['autoScan', 'adminOrganicCollection'], (result) => {
+              if (result.autoScan || result.adminOrganicCollection) {
+                chrome.runtime.sendMessage({
+                  action: "autoScanTweet",
+                  text: info.text,
+                  tweetId: info.tweetId,
+                  author: info.author
+                });
+              }
             });
             if (info.author?.handle) {
               chrome.runtime.sendMessage({ action: "checkSuspicious", handle: info.author.handle });
@@ -1168,7 +1357,8 @@ const UNIFIED_SLOP_RULES = [
   { regex: /\bact (as|like) (a |an )?(professional|expert|senior|world-class|harvard)/gi, label: "Institutional Launder", description: "Steals the credibility of elite brands to launder low-quality content.", points: 5 },
   { regex: /\bstep[\s-]by[\s-]step\b/gi, label: "List Formula", description: "Makes complex technology seem simple for the unqualified.", points: 5 },
   { regex: /\b[1-9]\d*\+?\s*free\s+(ai\s+)?courses?\b/gi, label: "Lead Magnet", description: "The 'value' is bait for a downstream product or newsletter.", points: 5 },
-  { regex: /\bBREAKING\b/g, label: "Clickbait Opener", description: "Artificially creates urgency to capture your initial scroll-speed.", points: 5 },
+  // BREAKING: Only flag when followed by income/tool/free claims (not genuine news)
+  { regex: /\bBREAKING\b.{0,80}(free|prompts?|\$[\d,]+|replac|for free|tool|hack|secret|cheat)/gi, label: "Clickbait Opener", description: "Artificially creates urgency to capture your initial scroll-speed.", points: 5 },
   { regex: /\bGOODBYE\b/g, label: "Clickbait Opener", description: "Uses finality to create a curiosity gap.", points: 5 },
   { regex: /\bR\.?I\.?P\.?\b/gi, label: "Clickbait Opener", description: "Uses fake finality to harvest engagement.", points: 5 },
   { regex: /\bSTOP (telling|using|doing|saying)\b/g, label: "Clickbait Opener", description: "Weaponizes authority to command your attention.", points: 5 },

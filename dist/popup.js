@@ -2,10 +2,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const apiKeyInput = document.getElementById('apiKey');
   const saveBtn = document.getElementById('saveBtn');
   const statusEl = document.getElementById('status');
-  const updateBtn = document.getElementById('updateBtn');
-  const updateStatus = document.getElementById('updateStatus');
+  const communityShieldToggle = document.getElementById('communityShieldToggle');
   const autoScanToggle = document.getElementById('autoScanToggle');
   const hunterVisionToggle = document.getElementById('hunterVisionToggle');
+  const smartSlopGuardToggle = document.getElementById('autoHumanDetectionToggle');
   const slopAction = document.getElementById('slopAction');
   const thresholdSlider = document.getElementById('thresholdSlider');
   const thresholdVal = document.getElementById('thresholdVal');
@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const clearHistoryBtn = document.getElementById('clearHistoryBtn');
   const historyList = document.getElementById('historyList');
   const slopsCaughtCountEl = document.getElementById('slopsCaughtCount');
+  const adminOrganicToggle = document.getElementById('adminOrganicToggle');
   
   const repoUrl = 'https://github.com/woodRock/zero-slop';
   const rawManifestUrl = 'https://raw.githubusercontent.com/woodRock/zero-slop/main/manifest.json';
@@ -28,17 +29,27 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load state
-  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'slopAction', 'hideThreshold', 'scanHistory', 'slopsCaught', 'hunterVision'], (result) => {
+  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'communityShield', 'slopAction', 'hideThreshold', 'scanHistory', 'slopsCaught', 'hunterVision', 'autoHumanDetection', 'adminOrganicCollection'], (result) => {
     if (result.zerogptApiKey) {
       apiKeyInput.value = result.zerogptApiKey;
       statusEl.textContent = 'API Key is already set.';
       statusEl.className = 'status success';
+    }
+    if (result.communityShield !== false) {
+      // Enabled by default
+      communityShieldToggle.checked = result.communityShield !== false;
     }
     if (result.autoScan) {
       autoScanToggle.checked = true;
     }
     if (result.hunterVision) {
       hunterVisionToggle.checked = true;
+    }
+    if (result.autoHumanDetection) {
+      smartSlopGuardToggle.checked = true;
+    }
+    if (result.adminOrganicCollection) {
+      adminOrganicToggle.checked = true;
     }
     if (result.slopAction) {
       slopAction.value = result.slopAction;
@@ -68,7 +79,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Toggle auto-scan
+  // Toggle community shield (Layer 1)
+  communityShieldToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ communityShield: e.target.checked });
+  });
+
+  // Toggle auto-scan (Layer 4)
   autoScanToggle.addEventListener('change', (e) => {
     chrome.storage.local.set({ autoScan: e.target.checked });
   });
@@ -76,6 +92,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // Toggle hunter vision
   hunterVisionToggle.addEventListener('change', (e) => {
     chrome.storage.local.set({ hunterVision: e.target.checked });
+  });
+
+  // Toggle auto human detection (now Smart Slop Guard)
+  smartSlopGuardToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ autoHumanDetection: e.target.checked });
+  });
+
+  // Toggle admin organic data collection
+  adminOrganicToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ adminOrganicCollection: e.target.checked });
   });
 
   // Update slop action
@@ -87,6 +113,14 @@ document.addEventListener('DOMContentLoaded', () => {
   thresholdSlider.addEventListener('input', (e) => {
     thresholdVal.textContent = e.target.value;
     chrome.storage.local.set({ hideThreshold: parseInt(e.target.value, 10) });
+  });
+
+  // Toggle advanced settings
+  const advancedToggle = document.getElementById('advancedToggle');
+  const advancedContent = document.getElementById('advancedContent');
+  advancedToggle.addEventListener('click', () => {
+    advancedContent.classList.toggle('show');
+    advancedToggle.innerText = advancedContent.classList.contains('show') ? '⚙️ Advanced Settings ▴' : '⚙️ Advanced Settings ▾';
   });
 
   // Render history
@@ -139,28 +173,5 @@ document.addEventListener('DOMContentLoaded', () => {
       a.click();
       URL.revokeObjectURL(url);
     });
-  });
-
-  // Check for updates
-  updateBtn.addEventListener('click', async () => {
-    updateStatus.textContent = 'Checking GitHub...';
-    updateStatus.className = 'status';
-    try {
-      const response = await fetch(`${rawManifestUrl}?t=${Date.now()}`);
-      if (!response.ok) throw new Error('Network error');
-      const remoteManifest = await response.json();
-      const localVersion = chrome.runtime.getManifest().version;
-
-      if (remoteManifest.version !== localVersion) {
-        updateStatus.innerHTML = `New version <b>${remoteManifest.version}</b> available! <br><a href="${repoUrl}" target="_blank" style="color: #1d9bf0;">Click here to pull changes from GitHub</a>.`;
-        updateStatus.className = 'status success';
-      } else {
-        updateStatus.textContent = `You are on the latest version (${localVersion}).`;
-        updateStatus.className = 'status success';
-      }
-    } catch (e) {
-      updateStatus.textContent = 'Could not fetch from GitHub. Ensure your internet is connected and the repo is public.';
-      updateStatus.className = 'status error';
-    }
   });
 });

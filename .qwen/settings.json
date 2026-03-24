@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp *)",
+      "Bash(zip *)",
+      "Bash(unzip *)",
+      "Bash(mkdir *)",
+      "Bash(rm *)",
+      "Bash(ls *)",
+      "Bash(git status *)"
+    ]
+  }
+}
