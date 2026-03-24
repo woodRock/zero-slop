@@ -405,6 +405,17 @@ function App() {
                     const escapeCSV = (str) => { if (!str) return '""'; const clean = str.toString().replace(/"/g, '""').replace(/\n/g, ' '); return `"${clean}"`; };
                     
                     const ORGANIC_GUARD_RULES = [
+                      /\b(stop|still)\s+paying\s+for\b.{0,30}(storage|icloud|gmail|subscription)/i,
+                      /\bI\s+(found|discovered)\s+a\s+(way|secret|tool)\b/i,
+                      /\b(I\s+)?hope\s+this\s+helps\s+you\s*↓/i,
+                      /\bstop\s+(declining|rejecting)\s+spam\s+calls\b/i,
+                      /\bif\s+your\s+iphone\s+gets\s+stolen\b/i,
+                      /\b(most|9[59]% of)\s+(developers|students|people)\s+are\s+using\b.{0,30}\bwrong\b/i,
+                      /\bsomeone\s+(built|leaked|compiled|just)\s+a\s+(tool|skill|system|repo|skill)\b/i,
+                      /\b(your|a)\s+\$[\d,]+\s+camera\b.{0,50}\blosing\b/i,
+                      /\b(vibe\s+coding|claude\s+code|openclaw)\b/i,
+                      /\b(don.t|do\s+not)\s+change\s+the\s+iphone\b/i,
+                      /\bbest\s+for\s+(logic|writing|research|video)\b/i,
                       /\bfollow\s+(me|@\w+)\b/i, /must follow/i, /\bcomment\b.{0,30}\bto\b/i,
                       /\b(retweet|like\s+and)\b/i, /\bbookmark\s+(this|it|now|thread)\b/i, /\bsave\s+this\b/i,
                       /\$[\d,]+\+?\/(mo|month|day|week|hr|hour|year)/i, /\$[\d,]+[k]?\s*per\s*(mo|month|day|week|hour)/i, /\$[\d,]+[k]?\/?hour/i,

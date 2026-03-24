@@ -27,6 +27,17 @@ def fetch_registry_data():
     rows = []
     
     ORGANIC_GUARD_RULES = [
+        r'\b(stop|still)\s+paying\s+for\b.{0,30}(storage|icloud|gmail|subscription)',
+        r'\bI\s+(found|discovered)\s+a\s+(way|secret|tool)\b',
+        r'\b(I\s+)?hope\s+this\s+helps\s+you\s*↓',
+        r'\bstop\s+(declining|rejecting)\s+spam\s+calls\b',
+        r'\bif\s+your\s+iphone\s+gets\s+stolen\b',
+        r'\b(most|9[59]% of)\s+(developers|students|people)\s+are\s+using\b.{0,30}\bwrong\b',
+        r'\bsomeone\s+(built|leaked|compiled|just)\s+a\s+(tool|skill|system|repo|skill)\b',
+        r'\b(your|a)\s+\$[\d,]+\s+camera\b.{0,50}\blosing\b',
+        r'\b(vibe\s+coding|claude\s+code|openclaw)\b',
+        r'\b(don.t|do\s+not)\s+change\s+the\s+iphone\b',
+        r'\bbest\s+for\s+(logic|writing|research|video)\b',
         r'\bfollow\s+(me|@\w+)\b', r'must follow', r'\bcomment\b.{0,30}\bto\b',
         r'\b(retweet|like\s+and)\b', r'\bbookmark\s+(this|it|now|thread)\b', r'\bsave\s+this\b',
         r'\$[\d,]+\+?\/(mo|month|day|week|hr|hour|year)', r'\$[\d,]+[k]?\s*per\s*(mo|month|day|week|hour)', r'\$[\d,]+[k]?\/?hour',
