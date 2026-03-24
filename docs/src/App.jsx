@@ -405,6 +405,32 @@ function App() {
                     const escapeCSV = (str) => { if (!str) return '""'; const clean = str.toString().replace(/"/g, '""').replace(/\n/g, ' '); return `"${clean}"`; };
                     
                     const ORGANIC_GUARD_RULES = [
+                      // --- Hard Blocks (Points >= 5) ---
+                      /\bfollow\s+(me|@\w+)\b/i, /must follow/i, /\bcomment\b.{0,30}\bto (get|receive|join|access)\b/i,
+                      /\b(retweet|like\s+and\s+retweet)\b/i, /\bbookmark\s+(this|it|now|thread|post)\b/i, /\bsave\s+this\b/i,
+                      /\b(dm\s+me|dm\s+for|send\s+me\s+(a\s+)?dm)\b/i,
+                      /\$[\d,]+\+?\s*\/\s*(mo|month|day|week|hr|hour|year)/i, /\$[\d,]+[k]?\s+per\s+(mo|month|day|week|hour)/i,
+                      /\$[\d,]+.{0,40}(replac|instead of|consultant|lawyer|doctor|agency|degree|analyst|designer|copywriter)/i,
+                      /\b(make|earn|generate|earning|making)\b.{0,20}\$[\d,]+/i,
+                      /\b(money machine|cash machine|print money|income machine)\b/i, /\bside\s+(hustle|income)\b/i, /\bdata entry\b/i,
+                      /\bhere are\s+[1-9]\d*\b/i, /\b[1-9]\d*\s+prompts?\b/i,
+                      /\b[1-9]\d*\s+(tools?|hacks?|tricks?|ways?|tips?|secrets?|mistakes?|steps?)\b/i,
+                      /\b(use these|try these|steal these|copy these)\b.{0,20}\b(prompts?|tools?|tricks?)\b/i,
+                      /\bact (as|like) (a |an )?(professional|expert|senior|world-class|harvard)/i,
+                      /\bstep[\s-]by[\s-]step\b/i, /\b[1-9]\d*\+?\s*free\s+(ai\s+)?courses?\b/i,
+                      /\bBREAKING\b/, /\bGOODBYE\b/, /\bR\.?I\.?P\.?\b/i, /\bSTOP (telling|using|doing|saying)\b/,
+                      /\bCANCELLED\b.{0,60}(chatgpt|netflix|spotify|prime|subscription)/i,
+                      /\b(most people don.t know|nobody (talks|is talking) about|very few (know|people)|hardly anyone|95% of people|99% of people)\b/i,
+                      /\bfor free\b/i, /\bfaceless\b/i, /passive income/i,
+                      /\bno (experience|skills?|coding|degree|team|budget|camera|luck)\b/i,
+                      /\bzero to.{0,30}(income|money|\$)\b/i, /\b(forget|ditch|quit|goodbye|replace)\s+chatgpt\b/i,
+                      /\b(giveaway|giving away)\b/i, /\b(prize|reward).{0,30}(follow|retweet|like|comment|enter)/i,
+                      /\bfree for \d+\s*hours?\b/i, /\b(limited (spots?|seats?)|only \d+ spots?)\b/i,
+                      /\b(paid courses?).{0,30}free\b/i, /\ball paid.{0,20}free\b/i,
+                      /\b(blueprint|masterclass|cheatsheet|playbook).{0,40}(free|get|dm|comment|follow)\b/i,
+                      /\b(course|ebook|pdf).{0,40}\$[\d,]+\b/i,
+                      /\bgrok.{0,20}imagine\b/i, /\b(apob|pollo ai|seedance|heygen|synthesia)\b/i,
+                      /\bai\s+ugc\b/i, /\bupload.{0,20}(photo|video|image).{0,40}(generate|create|make|turn into)\b/i,
                       /\b(stop|still)\s+paying\s+for\b.{0,30}(storage|icloud|gmail|subscription)/i,
                       /\bI\s+(found|discovered)\s+a\s+(way|secret|tool)\b/i,
                       /\b(I\s+)?hope\s+this\s+helps\s+you\s*↓/i,
@@ -416,14 +442,9 @@ function App() {
                       /\b(vibe\s+coding|claude\s+code|openclaw)\b/i,
                       /\b(don.t|do\s+not)\s+change\s+the\s+iphone\b/i,
                       /\bbest\s+for\s+(logic|writing|research|video)\b/i,
-                      /\bfollow\s+(me|@\w+)\b/i, /must follow/i, /\bcomment\b.{0,30}\bto\b/i,
-                      /\b(retweet|like\s+and)\b/i, /\bbookmark\s+(this|it|now|thread)\b/i, /\bsave\s+this\b/i,
-                      /\$[\d,]+\+?\/(mo|month|day|week|hr|hour|year)/i, /\$[\d,]+[k]?\s*per\s*(mo|month|day|week|hour)/i, /\$[\d,]+[k]?\/?hour/i,
-                      /\$[\d,]+.{0,30}(replac|instead of|consultant|lawyer|doctor|agency|terminal|degree|subscription)/i,
-                      /\bhere are\s+\d+\b/i, /\b\d+\s+prompts?\b/i, /\b\d+\s+(tools?|hacks?|tricks?|ways?|tips?)\b/i,
-                      /BREAKING.{0,80}free/, /\bR\.?I\.?P\.?\b.{0,40}(subscription|premium|chatgpt|spotify|netflix|hulu|amazon prime)/i,
-                      /\bGOODBYE\b.{0,40}(chatgpt|subscription|manager|terminal|premium)/i, /zero to.{0,30}(income|money|\$)/i,
-                      /\bfaceless\b/i, /passive income/i
+
+                      // --- Soft Signals ---
+                      /[\u{1D400}-\u{1D7FF}]/u, /(changed my life|show more|read on|curiosity)/i, /\+.{0,20}\+.{0,20}=/
                     ];
 
                     const csvRows = [ 
@@ -437,8 +458,9 @@ function App() {
                         const isSlopHeuristic = ORGANIC_GUARD_RULES.some(re => re.test(text));
 
                         let label = "organic-human";
-                        if (score > 15) label = "ai-generated";
-                        if ((slopType && slopType !== "type_organic_human") || 
+                        if (score > 15) {
+                          label = "ai-generated";
+                        } else if ((slopType && slopType !== "type_organic_human") || 
                             (manualReport && slopType !== "type_organic_human") ||
                             (isSlopHeuristic && slopType !== "type_organic_human")) {
                           label = "slop-factory";

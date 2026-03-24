@@ -27,6 +27,32 @@ def fetch_registry_data():
     rows = []
     
     ORGANIC_GUARD_RULES = [
+        # --- Hard Blocks (Points >= 5) ---
+        r'\bfollow\s+(me|@\w+)\b', r'must follow', r'\bcomment\b.{0,30}\bto (get|receive|join|access)\b',
+        r'\b(retweet|like\s+and\s+retweet)\b', r'\bbookmark\s+(this|it|now|thread|post)\b', r'\bsave\s+this\b',
+        r'\b(dm\s+me|dm\s+for|send\s+me\s+(a\s+)?dm)\b',
+        r'\$[\d,]+\+?\s*\/\s*(mo|month|day|week|hr|hour|year)', r'\$[\d,]+[k]?\s+per\s+(mo|month|day|week|hour)',
+        r'\$[\d,]+.{0,40}(replac|instead of|consultant|lawyer|doctor|agency|degree|analyst|designer|copywriter)',
+        r'\b(make|earn|generate|earning|making)\b.{0,20}\$[\d,]+',
+        r'\b(money machine|cash machine|print money|income machine)\b', r'\bside\s+(hustle|income)\b', r'\bdata entry\b',
+        r'\bhere are\s+[1-9]\d*\b', r'\b[1-9]\d*\s+prompts?\b',
+        r'\b[1-9]\d*\s+(tools?|hacks?|tricks?|ways?|tips?|secrets?|mistakes?|steps?)\b',
+        r'\b(use these|try these|steal these|copy these)\b.{0,20}\b(prompts?|tools?|tricks?)\b',
+        r'\bact (as|like) (a |an )?(professional|expert|senior|world-class|harvard)',
+        r'\bstep[\s-]by[\s-]step\b', r'\b[1-9]\d*\+?\s*free\s+(ai\s+)?courses?\b',
+        r'\bBREAKING\b', r'\bGOODBYE\b', r'\bR\.?I\.?P\.?\b', r'\bSTOP (telling|using|doing|saying)\b',
+        r'\bCANCELLED\b.{0,60}(chatgpt|netflix|spotify|prime|subscription)',
+        r'\b(most people don.t know|nobody (talks|is talking) about|very few (know|people)|hardly anyone|95% of people|99% of people)\b',
+        r'\bfor free\b', r'\bfaceless\b', r'passive income',
+        r'\bno (experience|skills?|coding|degree|team|budget|camera|luck)\b',
+        r'\bzero to.{0,30}(income|money|\$)\b', r'\b(forget|ditch|quit|goodbye|replace)\s+chatgpt\b',
+        r'\b(giveaway|giving away)\b', r'\b(prize|reward).{0,30}(follow|retweet|like|comment|enter)',
+        r'\bfree for \d+\s*hours?\b', r'\b(limited (spots?|seats?)|only \d+ spots?)\b',
+        r'\b(paid courses?).{0,30}free\b', r'\ball paid.{0,20}free\b',
+        r'\b(blueprint|masterclass|cheatsheet|playbook).{0,40}(free|get|dm|comment|follow)\b',
+        r'\b(course|ebook|pdf).{0,40}\$[\d,]+\b',
+        r'\bgrok.{0,20}imagine\b', r'\b(apob|pollo ai|seedance|heygen|synthesia)\b',
+        r'\bai\s+ugc\b', r'\bupload.{0,20}(photo|video|image).{0,40}(generate|create|make|turn into)\b',
         r'\b(stop|still)\s+paying\s+for\b.{0,30}(storage|icloud|gmail|subscription)',
         r'\bI\s+(found|discovered)\s+a\s+(way|secret|tool)\b',
         r'\b(I\s+)?hope\s+this\s+helps\s+you\s*↓',
@@ -38,14 +64,9 @@ def fetch_registry_data():
         r'\b(vibe\s+coding|claude\s+code|openclaw)\b',
         r'\b(don.t|do\s+not)\s+change\s+the\s+iphone\b',
         r'\bbest\s+for\s+(logic|writing|research|video)\b',
-        r'\bfollow\s+(me|@\w+)\b', r'must follow', r'\bcomment\b.{0,30}\bto\b',
-        r'\b(retweet|like\s+and)\b', r'\bbookmark\s+(this|it|now|thread)\b', r'\bsave\s+this\b',
-        r'\$[\d,]+\+?\/(mo|month|day|week|hr|hour|year)', r'\$[\d,]+[k]?\s*per\s*(mo|month|day|week|hour)', r'\$[\d,]+[k]?\/?hour',
-        r'\$[\d,]+.{0,30}(replac|instead of|consultant|lawyer|doctor|agency|terminal|degree|subscription)',
-        r'\bhere are\s+\d+\b', r'\b\d+\s+prompts?\b', r'\b\d+\s+(tools?|hacks?|tricks?|ways?|tips?)\b',
-        r'BREAKING.{0,80}free', r'\bR\.?I\.?P\.?\b.{0,40}(subscription|premium|chatgpt|spotify|netflix|hulu|amazon prime)',
-        r'\bGOODBYE\b.{0,40}(chatgpt|subscription|manager|terminal|premium)', r'zero to.{0,30}(income|money|\$)',
-        r'\bfaceless\b', r'passive income'
+
+        # --- Soft Signals (Points < 5, still reclassify as slop-factory for safety) ---
+        r'[\u{1D400}-\u{1D7FF}]', r'(changed my life|show more|read on|curiosity)', r'\+.{0,20}\+.{0,20}='
     ]
 
     for doc in documents:
@@ -60,7 +81,7 @@ def fetch_registry_data():
         label = 'organic-human'
         if ai_score > 15:
             label = 'ai-generated'
-        if (slop_type and slop_type != 'type_organic_human') or \
+        elif (slop_type and slop_type != 'type_organic_human') or \
            (is_manual and slop_type != 'type_organic_human') or \
            (is_slop_heuristic and slop_type != 'type_organic_human'):
             label = 'slop-factory'
