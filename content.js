@@ -168,6 +168,10 @@ function injectSlopFactoryHeaderBadge(handle) {
 
 function injectSlopFactoryBadge(container, handle) {
   if (!container || container.querySelector('.zerogpt-slopfactory-badge')) return;
+  
+  // Clean up any local "Likely Human" badges if we've now verified this as a factory
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
 
   const badge = document.createElement('div');
   badge.className = 'zerogpt-slopfactory-badge';
@@ -283,6 +287,9 @@ function injectHighAIHeaderBadge(handle) {
 function injectHighAIBadge(container, handle) {
   if (!container || container.querySelector('.zerogpt-highai-badge')) return;
 
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
+
   const badge = document.createElement('div');
   badge.className = 'zerogpt-highai-badge';
   badge.style.cssText = `
@@ -393,6 +400,9 @@ function injectOrganicHeaderBadge(handle) {
 function injectOrganicBadge(container, handle) {
   if (!container || container.querySelector('.zerogpt-organic-badge')) return;
 
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
+
   const badge = document.createElement('div');
   badge.className = 'zerogpt-organic-badge';
   badge.style.cssText = `
@@ -467,6 +477,9 @@ function injectSuspiciousBanner(handle, reasonTweetId) {
 
 function injectSuspiciousBadge(container, handle) {
   if (!container || container.querySelector('.zerogpt-suspicious-badge')) return;
+
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
 
   const badge = document.createElement('div');
   badge.className = 'zerogpt-suspicious-badge';
@@ -676,6 +689,9 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
 
   if (!container || container.querySelector('.zerogpt-badge')) return;
 
+  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
+  if (localBadge) localBadge.remove();
+
   if (downvotes > upvotes + 2) {
     return;
   }
@@ -734,7 +750,13 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
 }
 
 function injectLikelyHumanBadge(container, labelText = "LIKELY HUMAN", bgColor = "#00ba7c") {
-  if (!container || container.querySelector('.zerogpt-likely-human-badge') || container.querySelector('.zerogpt-badge')) return;
+  if (!container) return;
+  
+  // Do not inject if ANY other ZeroSlop-related badge is already present
+  const hasOtherBadge = container.querySelector(
+    '.zerogpt-badge, .zerogpt-slopfactory-badge, .zerogpt-highai-badge, .zerogpt-organic-badge, .zerogpt-suspicious-badge, .zerogpt-likely-human-badge'
+  );
+  if (hasOtherBadge) return;
 
   const badge = document.createElement('div');
   badge.className = 'zerogpt-likely-human-badge';

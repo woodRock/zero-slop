@@ -408,9 +408,13 @@ function App() {
                       ...reg.map(d => {
                         const score = d.fields.ai_score?.doubleValue || d.fields.ai_score?.integerValue || 0;
                         const slopType = d.fields.slop_type?.stringValue;
-                        let label = score > 15 ? "ai-generated" : "organic-human";
-                        if (slopType && slopType !== "type_organic_human") label = "slop-factory";
-                        if (slopType === "type_organic_human") label = "organic-human";
+                        const manualReport = d.fields.manual_report?.booleanValue || false;
+                        
+                        let label = "organic-human";
+                        if (score > 15) label = "ai-generated";
+                        if ((slopType && slopType !== "type_organic_human") || (manualReport && slopType !== "type_organic_human")) {
+                          label = "slop-factory";
+                        }
                         
                         return ["Tweet", escapeCSV(d.fields.author_handle?.stringValue), escapeCSV(d.fields.text?.stringValue), score, escapeCSV(d.updateTime), label];
                       }), 

@@ -27,12 +27,20 @@ def fetch_registry_data():
     rows = []
     for doc in documents:
         fields = doc.get('fields', {})
-        # Map Firestore types to Python values
+        ai_score = float(fields.get('ai_score', {}).get('doubleValue', fields.get('ai_score', {}).get('integerValue', 0)))
+        slop_type = fields.get('slop_type', {}).get('stringValue')
+        is_manual = fields.get('manual_report', {}).get('booleanValue', False)
+        
+        label = 'organic-human'
+        if ai_score > 15:
+            label = 'ai-generated'
+        if (slop_type and slop_type != 'type_organic_human') or (is_manual and slop_type != 'type_organic_human'):
+            label = 'slop-factory'
+            
         row = {
             'Text': fields.get('text', {}).get('stringValue', ''),
-            'AI Score': float(fields.get('ai_score', {}).get('doubleValue', fields.get('ai_score', {}).get('integerValue', 0))),
-            'Label': 'organic-human' if fields.get('slop_type', {}).get('stringValue') == 'type_organic_human' else 
-                     'slop-factory' if fields.get('manual_report', {}).get('booleanValue') else 'ai-generated'
+            'AI Score': ai_score,
+            'Label': label
         }
         if row['Text']:
             rows.append(row)
