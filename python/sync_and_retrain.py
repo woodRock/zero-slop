@@ -1,5 +1,6 @@
 import requests
 import json
+import re
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -7,6 +8,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, accuracy_score, balanced_accuracy_score
 
 # Configuration from your background.js
 FIREBASE_PROJECT_ID = "zero-slop"
@@ -14,17 +17,8 @@ FIREBASE_API_KEY = "AIzaSyDDx5ZbgWcgsKxsP78EubqyWRHL9yxdXec"
 
 def fetch_registry_data():
     print("Fetching latest data from ZeroSlop Registry...")
-    url = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/slop_registry?key={FIREBASE_API_KEY}&pageSize=1000"
-    
-    response = requests.get(url)
-    if not response.ok:
-        print(f"Error fetching data: {response.text}")
-        return None
-    
-    data = response.json()
-    documents = data.get('documents', [])
-    
-    rows = []
+    all_rows = []
+    page_token = None
     
     ORGANIC_GUARD_RULES = [
         # --- Hard Blocks (Points >= 5) ---
@@ -64,54 +58,96 @@ def fetch_registry_data():
         r'\b(vibe\s+coding|claude\s+code|openclaw)\b',
         r'\b(don.t|do\s+not)\s+change\s+the\s+iphone\b',
         r'\bbest\s+for\s+(logic|writing|research|video)\b',
-
-        # --- Soft Signals (Points < 5, still reclassify as slop-factory for safety) ---
-        r'[\u{1D400}-\u{1D7FF}]', r'(changed my life|show more|read on|curiosity)', r'\+.{0,20}\+.{0,20}='
+        r'[^\x00-\x7F]', r'(changed my life|show more|read on|curiosity)', r'\+.{0,20}\+.{0,20}='
     ]
 
-    for doc in documents:
-        fields = doc.get('fields', {})
-        ai_score = float(fields.get('ai_score', {}).get('doubleValue', fields.get('ai_score', {}).get('integerValue', 0)))
-        slop_type = fields.get('slop_type', {}).get('stringValue')
-        is_manual = fields.get('manual_report', {}).get('booleanValue', False)
-        text = fields.get('text', {}).get('stringValue', '')
+    while True:
+        url = f"https://firestore.googleapis.com/v1/projects/{FIREBASE_PROJECT_ID}/databases/(default)/documents/slop_registry?key={FIREBASE_API_KEY}&pageSize=1000"
+        if page_token:
+            url += f"&pageToken={page_token}"
+            
+        response = requests.get(url)
+        if not response.ok:
+            print(f"Error fetching data: {response.text}")
+            break
         
-        is_slop_heuristic = any(re.search(rule, text, re.IGNORECASE if "BREAKING" not in rule else 0) for rule in ORGANIC_GUARD_RULES)
+        data = response.json()
+        documents = data.get('documents', [])
+        
+        for doc in documents:
+            fields = doc.get('fields', {})
+            ai_score = float(fields.get('ai_score', {}).get('doubleValue', fields.get('ai_score', {}).get('integerValue', 0)))
+            slop_type = fields.get('slop_type', {}).get('stringValue')
+            is_manual = fields.get('manual_report', {}).get('booleanValue', False)
+            text = fields.get('text', {}).get('stringValue', '')
+            
+            is_slop_heuristic = any(re.search(rule, text, re.IGNORECASE if "BREAKING" not in rule else 0) for rule in ORGANIC_GUARD_RULES)
 
-        label = 'organic-human'
-        if ai_score > 15:
-            label = 'ai-generated'
-        elif (slop_type and slop_type != 'type_organic_human') or \
-           (is_manual and slop_type != 'type_organic_human') or \
-           (is_slop_heuristic and slop_type != 'type_organic_human'):
-            label = 'slop-factory'
+            label = 'organic-human'
+            if ai_score > 15:
+                label = 'ai-generated'
+            elif (slop_type and slop_type != 'type_organic_human') or \
+               (is_manual and is_manual != False) or \
+               (is_slop_heuristic):
+                # We prioritize slop types and heuristics as slop-factory
+                label = 'slop-factory'
             
-        row = {
-            'Text': text,
-            'AI Score': ai_score,
-            'Label': label
-        }
-        if row['Text']:
-            rows.append(row)
+            # Use the hierarchy from our recent discussion
+            # Priority: AI-Generated > Slop-Factory > Organic
+            if ai_score > 15:
+                label = 'ai-generated'
+            elif (slop_type and slop_type != 'type_organic_human') or \
+                 (is_manual and slop_type != 'type_organic_human') or \
+                 (is_slop_heuristic and slop_type != 'type_organic_human'):
+                label = 'slop-factory'
+            else:
+                label = 'organic-human'
+                
+            if text:
+                all_rows.append({'Text': text, 'AI Score': ai_score, 'Label': label})
+        
+        page_token = data.get('nextPageToken')
+        if not page_token:
+            break
             
-    print(f"Downloaded {len(rows)} samples from the registry.")
-    return pd.DataFrame(rows)
+    print(f"Downloaded {len(all_rows)} samples from the registry.")
+    return pd.DataFrame(all_rows)
 
 def train_and_export(df):
-    print("Retraining model...")
+    # Aggressive Deduplication
+    print(f"Dataset size before deduplication: {len(df)}")
+    
+    # Filter out empty or NaN text
+    df = df[df['Text'].notna()].copy()
+    df['Text'] = df['Text'].astype(str)
+    df = df[df['Text'].str.strip() != '']
+    
+    # Create a normalized version for deduplication
+    df['text_normalized'] = df['Text'].str.lower().str.replace(r'\s+', ' ', regex=True).str.strip()
+    
+    # Keep the first occurrence of each unique normalized text
+    df = df.drop_duplicates(subset=['text_normalized'], keep='first')
+    
+    # Remove the temporary normalization column
+    df = df.drop(columns=['text_normalized'])
+    
+    print(f"Retraining model with {len(df)} unique samples...")
     # Basic Feature Engineering
-    df['text_len'] = df['Text'].apply(len)
-    df['word_count'] = df['Text'].apply(lambda x: len(x.split()))
+    df['text_len'] = df['Text'].apply(lambda x: len(str(x)))
+    df['word_count'] = df['Text'].apply(lambda x: len(str(x).split()))
     df['avg_word_len'] = df['text_len'] / (df['word_count'] + 1)
-    df['exclamation_count'] = df['Text'].apply(lambda x: x.count('!'))
-    df['question_count'] = df['Text'].apply(lambda x: x.count('?'))
-    df['emoji_count'] = df['Text'].apply(lambda x: sum(1 for char in x if ord(char) > 127))
+    df['exclamation_count'] = df['Text'].apply(lambda x: str(x).count('!'))
+    df['question_count'] = df['Text'].apply(lambda x: str(x).count('?'))
+    df['emoji_count'] = df['Text'].apply(lambda x: sum(1 for char in str(x) if ord(char) > 127))
 
     X = df[['Text', 'AI Score', 'text_len', 'word_count', 'avg_word_len', 'exclamation_count', 'question_count', 'emoji_count']]
     y = df['Label']
 
     le = LabelEncoder()
     y_encoded = le.fit_transform(y)
+
+    # Train-Validation Split (80/20)
+    X_train, X_val, y_train, y_val = train_test_split(X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded)
 
     preprocessor = ColumnTransformer(
         transformers=[
@@ -122,6 +158,22 @@ def train_and_export(df):
 
     clf = LogisticRegression(max_iter=1000)
     pipe = Pipeline([('pre', preprocessor), ('clf', clf)])
+    
+    # 1. Validation Phase
+    pipe.fit(X_train, y_train)
+    y_val_pred = pipe.predict(X_val)
+    
+    print("\n" + "="*40)
+    print(" MODEL PERFORMANCE METRICS (Validation)")
+    print("="*40)
+    print(f"Overall Accuracy:  {accuracy_score(y_val, y_val_pred):.4f}")
+    print(f"Balanced Accuracy: {balanced_accuracy_score(y_val, y_val_pred):.4f} (Avg Recall per class)")
+    print("\nDetailed Classification Report:")
+    print(classification_report(y_val, y_val_pred, target_names=le.classes_, zero_division=0))
+    print("="*40 + "\n")
+
+    # 2. Final Training on FULL dataset
+    print("Finalizing model on full dataset...")
     pipe.fit(X, y_encoded)
 
     # Export Logic
@@ -139,20 +191,27 @@ def train_and_export(df):
         'intercept': lr_model.intercept_.tolist()
     }
 
-    with open('model_weights.json', 'w') as f:
+    with open('../model_weights.json', 'w') as f:
         json.dump(model_data, f)
     
     print("Success! Updated model_weights.json with latest community data.")
 
 if __name__ == "__main__":
     registry_df = fetch_registry_data()
-    if registry_df is not None and len(registry_df) > 10:
-        # Mix in the original dataset to ensure stability if registry is still small
-        try:
-            original_df = pd.read_csv('zeroslop_dataset_2026-03-22.csv')
-            combined_df = pd.concat([registry_df, original_df]).drop_duplicates(subset=['Text'])
-            train_and_export(combined_df)
-        except:
+    
+    # Mix in the latest corrected dataset to ensure stability
+    try:
+        local_df = pd.read_csv('zeroslop_dataset_2026-03-24.csv')
+        if registry_df is not None and not registry_df.empty:
+            combined_df = pd.concat([registry_df, local_df]).drop_duplicates(subset=['Text'])
+        else:
+            combined_df = local_df
+            
+        print(f"Total dataset size after merge: {len(combined_df)}")
+        train_and_export(combined_df)
+    except Exception as e:
+        print(f"Error loading local CSV: {e}")
+        if registry_df is not None and not registry_df.empty:
             train_and_export(registry_df)
-    else:
-        print("Not enough new data in registry to warrant a retrain yet.")
+        else:
+            print("No data available to train.")

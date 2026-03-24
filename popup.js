@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusEl = document.getElementById('status');
   const autoScanToggle = document.getElementById('autoScanToggle');
   const hunterVisionToggle = document.getElementById('hunterVisionToggle');
+  const smartSlopGuardToggle = document.getElementById('autoHumanDetectionToggle');
   const slopAction = document.getElementById('slopAction');
   const thresholdSlider = document.getElementById('thresholdSlider');
   const thresholdVal = document.getElementById('thresholdVal');
@@ -26,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load state
-  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'slopAction', 'hideThreshold', 'scanHistory', 'slopsCaught', 'hunterVision'], (result) => {
+  chrome.storage.local.get(['zerogptApiKey', 'autoScan', 'slopAction', 'hideThreshold', 'scanHistory', 'slopsCaught', 'hunterVision', 'autoHumanDetection'], (result) => {
     if (result.zerogptApiKey) {
       apiKeyInput.value = result.zerogptApiKey;
       statusEl.textContent = 'API Key is already set.';
@@ -37,6 +38,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (result.hunterVision) {
       hunterVisionToggle.checked = true;
+    }
+    if (result.autoHumanDetection) {
+      smartSlopGuardToggle.checked = true;
     }
     if (result.slopAction) {
       slopAction.value = result.slopAction;
@@ -76,6 +80,11 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.set({ hunterVision: e.target.checked });
   });
 
+  // Toggle auto human detection (now Smart Slop Guard)
+  smartSlopGuardToggle.addEventListener('change', (e) => {
+    chrome.storage.local.set({ autoHumanDetection: e.target.checked });
+  });
+
   // Update slop action
   slopAction.addEventListener('change', (e) => {
     chrome.storage.local.set({ slopAction: e.target.value });
@@ -85,6 +94,14 @@ document.addEventListener('DOMContentLoaded', () => {
   thresholdSlider.addEventListener('input', (e) => {
     thresholdVal.textContent = e.target.value;
     chrome.storage.local.set({ hideThreshold: parseInt(e.target.value, 10) });
+  });
+
+  // Toggle advanced settings
+  const advancedToggle = document.getElementById('advancedToggle');
+  const advancedContent = document.getElementById('advancedContent');
+  advancedToggle.addEventListener('click', () => {
+    advancedContent.classList.toggle('show');
+    advancedToggle.innerText = advancedContent.classList.contains('show') ? '⚙️ Advanced Settings ▴' : '⚙️ Advanced Settings ▾';
   });
 
   // Render history

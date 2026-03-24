@@ -749,17 +749,17 @@ function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0)
   handleAutoAction(container, percentage);
 }
 
-function injectLikelyHumanBadge(container, labelText = "LIKELY HUMAN", bgColor = "#00ba7c") {
+function injectSmartSlopBadge(container, labelText = "SMART SLOP SIGNAL", bgColor = "#ffd700", textColor = "#000") {
   if (!container) return;
   
   // Do not inject if ANY other ZeroSlop-related badge is already present
   const hasOtherBadge = container.querySelector(
-    '.zerogpt-badge, .zerogpt-slopfactory-badge, .zerogpt-highai-badge, .zerogpt-organic-badge, .zerogpt-suspicious-badge, .zerogpt-likely-human-badge'
+    '.zerogpt-badge, .zerogpt-slopfactory-badge, .zerogpt-highai-badge, .zerogpt-organic-badge, .zerogpt-suspicious-badge, .zerogpt-likely-human-badge, .zeroslop-smart-badge'
   );
   if (hasOtherBadge) return;
 
   const badge = document.createElement('div');
-  badge.className = 'zerogpt-likely-human-badge';
+  badge.className = 'zeroslop-smart-badge';
   badge.style.cssText = `
     display: inline-flex;
     align-items: center;
@@ -768,16 +768,16 @@ function injectLikelyHumanBadge(container, labelText = "LIKELY HUMAN", bgColor =
     border-radius: 9999px;
     font-size: 10px;
     font-weight: bold;
-    color: #fff;
+    color: ${textColor};
     background-color: ${bgColor};
-    border: 1px solid rgba(255,255,255,0.2);
+    border: 1px solid rgba(0,0,0,0.1);
     vertical-align: middle;
     line-height: 1;
     height: 16px;
     cursor: help;
   `;
-  badge.innerHTML = (labelText.includes('HUMAN') ? '🌿 ' : '🔵 ') + labelText;
-  badge.title = `Local AI Classifier: High-confidence ${labelText.toLowerCase()} content.`;
+  badge.innerHTML = `🟡 ${labelText}`;
+  badge.title = `Smart Slop Guard: Our local model detected structural hallmarks of industrial engagement farming.`;
 
   const timeElement = container.querySelector('time');
   if (timeElement && timeElement.parentNode) {
@@ -838,14 +838,10 @@ async function initObservers() {
             if (prediction) {
               const { label, probability, probabilities } = prediction;
               
-              if (label === 'organic-human') {
-                if (probability > 0.95) {
-                  injectLikelyHumanBadge(container, "VERIFIED HUMAN", "#00ba7c");
-                } else if (probability > 0.80) {
-                  injectLikelyHumanBadge(container, "LIKELY HUMAN", "rgba(0, 186, 124, 0.7)");
-                }
-              } else if (label === 'ai-generated' && probability > 0.90) {
-                injectLikelyHumanBadge(container, "HIGH AI PROBABILITY", "#1d9bf0");
+              if (label === 'slop-factory' && probability > 0.70) {
+                injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
+              } else if (label === 'ai-generated' && probability > 0.70) {
+                injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
               }
             }
           }

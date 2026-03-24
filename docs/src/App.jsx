@@ -217,13 +217,18 @@ function App() {
         if (recentRes.ok) {
           const data = await recentRes.json();
           const documents = data.documents || [];
-          const recent = documents.map(doc => ({
-            name: doc.fields.author_name?.stringValue || "Unknown",
-            handle: doc.fields.author_handle?.stringValue || "@anonymous",
-            score: Math.round(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0),
-            pfp: doc.fields.author_pfp?.stringValue || "🤖",
-            updateTime: doc.updateTime
-          }));
+          const recent = documents
+            .filter(doc => {
+              const aiScore = doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0;
+              return aiScore > 15;
+            })
+            .map(doc => ({
+              name: doc.fields.author_name?.stringValue || "Unknown",
+              handle: doc.fields.author_handle?.stringValue || "@anonymous",
+              score: Math.round(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0),
+              pfp: doc.fields.author_pfp?.stringValue || "🤖",
+              updateTime: doc.updateTime
+            }));
           setWallOfShame(recent);
         }
 
