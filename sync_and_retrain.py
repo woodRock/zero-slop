@@ -25,20 +25,37 @@ def fetch_registry_data():
     documents = data.get('documents', [])
     
     rows = []
+    
+    ORGANIC_GUARD_RULES = [
+        r'\bfollow\s+(me|@\w+)\b', r'must follow', r'\bcomment\b.{0,30}\bto\b',
+        r'\b(retweet|like\s+and)\b', r'\bbookmark\s+(this|it|now|thread)\b', r'\bsave\s+this\b',
+        r'\$[\d,]+\+?\/(mo|month|day|week|hr|hour|year)', r'\$[\d,]+[k]?\s*per\s*(mo|month|day|week|hour)', r'\$[\d,]+[k]?\/?hour',
+        r'\$[\d,]+.{0,30}(replac|instead of|consultant|lawyer|doctor|agency|terminal|degree|subscription)',
+        r'\bhere are\s+\d+\b', r'\b\d+\s+prompts?\b', r'\b\d+\s+(tools?|hacks?|tricks?|ways?|tips?)\b',
+        r'BREAKING.{0,80}free', r'\bR\.?I\.?P\.?\b.{0,40}(subscription|premium|chatgpt|spotify|netflix|hulu|amazon prime)',
+        r'\bGOODBYE\b.{0,40}(chatgpt|subscription|manager|terminal|premium)', r'zero to.{0,30}(income|money|\$)',
+        r'\bfaceless\b', r'passive income'
+    ]
+
     for doc in documents:
         fields = doc.get('fields', {})
         ai_score = float(fields.get('ai_score', {}).get('doubleValue', fields.get('ai_score', {}).get('integerValue', 0)))
         slop_type = fields.get('slop_type', {}).get('stringValue')
         is_manual = fields.get('manual_report', {}).get('booleanValue', False)
+        text = fields.get('text', {}).get('stringValue', '')
         
+        is_slop_heuristic = any(re.search(rule, text, re.IGNORECASE if "BREAKING" not in rule else 0) for rule in ORGANIC_GUARD_RULES)
+
         label = 'organic-human'
         if ai_score > 15:
             label = 'ai-generated'
-        if (slop_type and slop_type != 'type_organic_human') or (is_manual and slop_type != 'type_organic_human'):
+        if (slop_type and slop_type != 'type_organic_human') or \
+           (is_manual and slop_type != 'type_organic_human') or \
+           (is_slop_heuristic and slop_type != 'type_organic_human'):
             label = 'slop-factory'
             
         row = {
-            'Text': fields.get('text', {}).get('stringValue', ''),
+            'Text': text,
             'AI Score': ai_score,
             'Label': label
         }

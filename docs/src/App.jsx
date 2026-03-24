@@ -403,16 +403,33 @@ function App() {
                   if (pass === "zeroslop-research-2026") {
                     const [reg, acc, susp] = await Promise.all([fetchAllPages('slop_registry'), fetchAllPages('slop_accounts'), fetchAllPages('suspicious_accounts')]);
                     const escapeCSV = (str) => { if (!str) return '""'; const clean = str.toString().replace(/"/g, '""').replace(/\n/g, ' '); return `"${clean}"`; };
+                    
+                    const ORGANIC_GUARD_RULES = [
+                      /\bfollow\s+(me|@\w+)\b/i, /must follow/i, /\bcomment\b.{0,30}\bto\b/i,
+                      /\b(retweet|like\s+and)\b/i, /\bbookmark\s+(this|it|now|thread)\b/i, /\bsave\s+this\b/i,
+                      /\$[\d,]+\+?\/(mo|month|day|week|hr|hour|year)/i, /\$[\d,]+[k]?\s*per\s*(mo|month|day|week|hour)/i, /\$[\d,]+[k]?\/?hour/i,
+                      /\$[\d,]+.{0,30}(replac|instead of|consultant|lawyer|doctor|agency|terminal|degree|subscription)/i,
+                      /\bhere are\s+\d+\b/i, /\b\d+\s+prompts?\b/i, /\b\d+\s+(tools?|hacks?|tricks?|ways?|tips?)\b/i,
+                      /BREAKING.{0,80}free/, /\bR\.?I\.?P\.?\b.{0,40}(subscription|premium|chatgpt|spotify|netflix|hulu|amazon prime)/i,
+                      /\bGOODBYE\b.{0,40}(chatgpt|subscription|manager|terminal|premium)/i, /zero to.{0,30}(income|money|\$)/i,
+                      /\bfaceless\b/i, /passive income/i
+                    ];
+
                     const csvRows = [ 
                       ["Type", "Handle", "Text", "AI Score", "Detected At", "Label"], 
                       ...reg.map(d => {
                         const score = d.fields.ai_score?.doubleValue || d.fields.ai_score?.integerValue || 0;
                         const slopType = d.fields.slop_type?.stringValue;
                         const manualReport = d.fields.manual_report?.booleanValue || false;
+                        const text = d.fields.text?.stringValue || "";
                         
+                        const isSlopHeuristic = ORGANIC_GUARD_RULES.some(re => re.test(text));
+
                         let label = "organic-human";
                         if (score > 15) label = "ai-generated";
-                        if ((slopType && slopType !== "type_organic_human") || (manualReport && slopType !== "type_organic_human")) {
+                        if ((slopType && slopType !== "type_organic_human") || 
+                            (manualReport && slopType !== "type_organic_human") ||
+                            (isSlopHeuristic && slopType !== "type_organic_human")) {
                           label = "slop-factory";
                         }
                         
