@@ -43,6 +43,128 @@ const firestoreUrl = (path) => `${FIRESTORE_DB}/${path}?key=${FIREBASE_CONFIG.ap
 const firestoreDoc = (path) => `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/${path}`;
 const IMAGE_CACHE_LIMIT = 500;
 const imageRegistryCache = new Map(); // mediaId -> { data, timestamp }
+const IMAGE_FOUND_TTL = 6 * 60 * 60 * 1000;
+const IMAGE_MISSING_TTL = 60 * 60 * 1000;
+const IMAGE_STORAGE_PREFIX = "imgreg_";
+
+// ---------------------------------------------------------------------------
+// Firestore read budget
+//
+// The registry runs on Firestore's free plan (about 50,000 document reads a day, shared by
+// every user and the website). Lookups that run for every post on screen are cached in
+// memory and in chrome.storage.local, "not found" is cached too, and after a 429 (quota
+// exceeded) no reads are sent for a while.
+// ---------------------------------------------------------------------------
+
+const HOUR = 60 * 60 * 1000;
+const QUOTA_BACKOFF_MIN = 5 * 60 * 1000;
+const QUOTA_BACKOFF_MAX = 60 * 60 * 1000;
+let firestoreBackoffUntil = 0;
+let firestoreBackoffMs = 0;
+const backoffLoaded = chrome.storage.local.get(["firestoreBackoff"]).then(({ firestoreBackoff }) => {
+  if (firestoreBackoff) {
+    firestoreBackoffUntil = Math.max(firestoreBackoffUntil, firestoreBackoff.until || 0);
+    firestoreBackoffMs = Math.max(firestoreBackoffMs, firestoreBackoff.ms || 0);
+  }
+}).catch(() => {});
+
+async function firestoreBackingOff() {
+  await backoffLoaded;
+  return Date.now() < firestoreBackoffUntil;
+}
+
+/** Call with every Firestore read response. A 429 pauses reads, doubling each time up to an hour. */
+function noteFirestoreResponse(response) {
+  if (response.status === 429) {
+    firestoreBackoffMs = Math.min(firestoreBackoffMs ? firestoreBackoffMs * 2 : QUOTA_BACKOFF_MIN, QUOTA_BACKOFF_MAX);
+    firestoreBackoffUntil = Date.now() + firestoreBackoffMs;
+    console.warn(`ZeroSlop: Registry quota exceeded; pausing lookups for ${Math.round(firestoreBackoffMs / 60000)} min`);
+    chrome.storage.local.set({ firestoreBackoff: { until: firestoreBackoffUntil, ms: firestoreBackoffMs } });
+  } else if (response.ok && firestoreBackoffMs) {
+    firestoreBackoffMs = 0;
+    chrome.storage.local.remove("firestoreBackoff");
+  }
+}
+
+const lookupMemory = new Map(); // storageKey -> { data, timestamp }
+const lookupInFlight = new Map(); // storageKey -> Promise
+const LOOKUP_MEMORY_LIMIT = 5000;
+const LOOKUP_PREFIXES = ["cache_", "acct_", "susp_", "prof_", IMAGE_STORAGE_PREFIX];
+
+function rememberLookup(storageKey, entry) {
+  lookupMemory.delete(storageKey);
+  lookupMemory.set(storageKey, entry);
+  if (lookupMemory.size > LOOKUP_MEMORY_LIMIT) lookupMemory.delete(lookupMemory.keys().next().value);
+}
+
+function forgetLookup(storageKey) {
+  lookupMemory.delete(storageKey);
+  chrome.storage.local.remove(storageKey);
+}
+
+/**
+ * Cached single-document lookup.
+ * fetcher() resolves to { found: true, data } / { found: false }, or throws on any other failure
+ * (network, 429, 5xx), which is not cached. While backing off, or when the fetch fails, the last
+ * cached value is returned even if it has expired.
+ */
+async function cachedLookup(storageKey, fetcher, { foundTtl, missingTtl }) {
+  const fresh = (entry) => entry && Date.now() - entry.timestamp < (entry.data ? foundTtl : missingTtl);
+
+  let entry = lookupMemory.get(storageKey);
+  if (fresh(entry)) return entry.data;
+
+  if (!entry) {
+    const stored = (await chrome.storage.local.get([storageKey]))[storageKey];
+    if (stored && typeof stored.timestamp === "number") {
+      entry = { data: stored.data ?? null, timestamp: stored.timestamp };
+      rememberLookup(storageKey, entry);
+      if (fresh(entry)) return entry.data;
+    }
+  }
+
+  if (await firestoreBackingOff()) return entry ? entry.data : null;
+
+  if (lookupInFlight.has(storageKey)) return lookupInFlight.get(storageKey);
+  const request = (async () => {
+    try {
+      const { found, data } = await fetcher();
+      const next = { data: found ? data : null, timestamp: Date.now() };
+      rememberLookup(storageKey, next);
+      chrome.storage.local.set({ [storageKey]: next });
+      return next.data;
+    } catch (e) {
+      return entry ? entry.data : null;
+    } finally {
+      lookupInFlight.delete(storageKey);
+    }
+  })();
+  lookupInFlight.set(storageKey, request);
+  return request;
+}
+
+/** GET one Firestore document. 404 means "not found"; any other failure throws. */
+async function fetchFirestoreDoc(path) {
+  const response = await fetch(firestoreUrl(`documents/${path}`));
+  noteFirestoreResponse(response);
+  if (response.ok) return { found: true, doc: await response.json() };
+  if (response.status === 404) return { found: false };
+  throw new Error(`Firestore read failed: HTTP ${response.status}`);
+}
+
+// Drop expired lookup entries from storage, at most once a day.
+async function pruneLookupStorage() {
+  const { lookupPrunedAt = 0 } = await chrome.storage.local.get(["lookupPrunedAt"]);
+  if (Date.now() - lookupPrunedAt < 24 * HOUR) return;
+  const all = await chrome.storage.local.get(null);
+  const stale = Object.keys(all).filter((key) =>
+    LOOKUP_PREFIXES.some((p) => key.startsWith(p)) &&
+    !(all[key] && typeof all[key].timestamp === "number" && Date.now() - all[key].timestamp < 7 * 24 * HOUR)
+  );
+  if (stale.length) await chrome.storage.local.remove(stale);
+  await chrome.storage.local.set({ lookupPrunedAt: Date.now() });
+}
+pruneLookupStorage().catch(() => {});
 
 // Image registry document IDs come from X's CDN path, e.g. "media_ABC123". Reject anything else.
 function validMediaId(id) {
@@ -86,38 +208,77 @@ function parseImageDoc(doc) {
   };
 }
 
-/** Look up image results in the community registry. Returns { mediaId: entry } for those found. */
+function setImageCache(id, entry) {
+  imageRegistryCache.set(id, entry);
+  if (imageRegistryCache.size > IMAGE_CACHE_LIMIT * 4) imageRegistryCache.delete(imageRegistryCache.keys().next().value);
+  chrome.storage.local.set({ [IMAGE_STORAGE_PREFIX + id]: entry });
+}
+
+function deleteImageCache(id) {
+  imageRegistryCache.delete(id);
+  chrome.storage.local.remove(IMAGE_STORAGE_PREFIX + id);
+}
+
+/**
+ * Look up image results in the community registry. Returns { mediaId: entry } for those found.
+ * Results are cached in memory and chrome.storage.local (found for 6 hours, not found for 1 hour).
+ * fresh: skip the cache, unless Firestore is refusing requests.
+ */
 async function getImageRegistry(mediaIds, { fresh = false } = {}) {
   const ids = [...new Set(mediaIds.filter(validMediaId))].slice(0, 20);
   const result = {};
-  const missing = [];
-  for (const id of ids) {
-    const cached = imageRegistryCache.get(id);
-    const ttl = cached?.data ? 6 * 60 * 60 * 1000 : 60 * 60 * 1000;
-    if (!fresh && cached && Date.now() - cached.timestamp < ttl) {
-      if (cached.data) result[id] = cached.data;
-    } else {
-      missing.push(id);
+  const isFresh = (entry) => entry && Date.now() - entry.timestamp < (entry.data ? IMAGE_FOUND_TTL : IMAGE_MISSING_TTL);
+
+  // Fill the memory cache from storage for ids it doesn't know yet (e.g. after the worker restarts).
+  const unknown = ids.filter((id) => !imageRegistryCache.has(id));
+  if (unknown.length) {
+    const stored = await chrome.storage.local.get(unknown.map((id) => IMAGE_STORAGE_PREFIX + id));
+    for (const id of unknown) {
+      const entry = stored[IMAGE_STORAGE_PREFIX + id];
+      if (entry && typeof entry.timestamp === "number") imageRegistryCache.set(id, { data: entry.data ?? null, timestamp: entry.timestamp });
     }
   }
+
+  const useCached = (id) => {
+    const cached = imageRegistryCache.get(id);
+    if (cached?.data) result[id] = cached.data;
+  };
+
+  const missing = [];
+  for (const id of ids) {
+    if (!fresh && isFresh(imageRegistryCache.get(id))) useCached(id);
+    else missing.push(id);
+  }
   if (!missing.length) return result;
+
+  if (await firestoreBackingOff()) {
+    missing.forEach(useCached); // stale is better than nothing
+    return result;
+  }
+
   try {
     const response = await fetch(firestoreUrl("documents:batchGet"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ documents: missing.map((id) => firestoreDoc(`image_registry/${id}`)) })
     });
-    if (!response.ok) return result;
+    noteFirestoreResponse(response);
+    if (!response.ok) {
+      missing.forEach(useCached);
+      return result;
+    }
     const rows = await response.json();
     for (const row of rows) {
       const name = row.found?.name || row.missing || "";
       const id = name.split("/").pop();
+      if (!validMediaId(id)) continue;
       const data = row.found ? parseImageDoc(row.found) : null;
-      imageRegistryCache.set(id, { data, timestamp: Date.now() });
+      setImageCache(id, { data, timestamp: Date.now() });
       if (data) result[id] = data;
     }
   } catch (e) {
     console.error("ZeroSlop: Image registry lookup failed", e);
+    missing.forEach(useCached);
   }
   return result;
 }
@@ -171,7 +332,7 @@ async function voteImage(mediaId, voteType) {
   };
   try {
     await fetch(firestoreUrl("documents:commit"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    imageRegistryCache.delete(mediaId);
+    deleteImageCache(mediaId);
   } catch (e) {
     console.error("ZeroSlop: Image vote failed", e);
   }
@@ -211,7 +372,7 @@ async function handleImageDetectResult(msg) {
   }).catch(() => {});
 
   await storeImageResult(msg);
-  imageRegistryCache.set(msg.mediaId, { data: { ...community, scoreSum: (before?.scoreSum || 0) + msg.result.score, kind: msg.kind, model: msg.result.model }, timestamp: Date.now() });
+  setImageCache(msg.mediaId, { data: { ...community, scoreSum: (before?.scoreSum || 0) + msg.result.score, kind: msg.kind, model: msg.result.model }, timestamp: Date.now() });
 }
 
 async function startImageCheck(tabId, requestId, url, tweetId, modelReady) {
@@ -532,67 +693,61 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-async function checkSlopAccount(handle) {
-  const accountId = handle.replace('@', '').toLowerCase();
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
+const accountKey = (handle) => handle.replace('@', '').toLowerCase();
 
-  try {
-    const response = await fetch(url);
-    if (response.ok) {
-      const doc = await response.json();
-      return {
-        handle: doc.fields.handle?.stringValue,
-        manual_reports: parseInt(doc.fields.manual_reports?.integerValue || 0),
-        shield_type: doc.fields.shield_type?.stringValue || 'red'
-      };
-    }
-  } catch (e) {}
-  return null;
+// Run for every post that scrolls into view, so cached: found for 6 hours, not found for 2.
+async function checkSlopAccount(handle) {
+  const accountId = accountKey(handle);
+  return cachedLookup(`acct_${accountId}`, async () => {
+    const { found, doc } = await fetchFirestoreDoc(`slop_accounts/${accountId}`);
+    if (!found) return { found: false };
+    const fields = doc.fields || {};
+    return {
+      found: true,
+      data: {
+        handle: fields.handle?.stringValue,
+        manual_reports: parseInt(fields.manual_reports?.integerValue || 0),
+        shield_type: fields.shield_type?.stringValue || 'red'
+      }
+    };
+  }, { foundTtl: 6 * HOUR, missingTtl: 2 * HOUR });
 }
 
+// Profile visits: one query per handle per hour.
 async function checkProfileSlop(handle) {
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:runQuery?key=${FIREBASE_CONFIG.apiKey}`;
-  const query = {
-    structuredQuery: {
-      from: [{ collectionId: "slop_registry" }],
-      where: {
-        fieldFilter: {
-          field: { fieldPath: "author_handle" },
-          op: "EQUAL",
-          value: { stringValue: handle }
+  return cachedLookup(`prof_${accountKey(handle)}`, async () => {
+    const url = firestoreUrl("documents:runQuery");
+    const query = {
+      structuredQuery: {
+        from: [{ collectionId: "slop_registry" }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: "author_handle" },
+            op: "EQUAL",
+            value: { stringValue: handle }
+          }
         }
       }
-    }
-  };
-
-  try {
+    };
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(query)
     });
+    noteFirestoreResponse(response);
+    if (!response.ok) throw new Error(`Firestore query failed: HTTP ${response.status}`);
 
-    if (response.ok) {
-      const results = await response.json();
-      const docs = results.filter(r => r.document).map(r => r.document);
-      
-      const highSlopDocs = docs.filter(doc => {
-        const score = doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0;
-        return score > 15;
-      });
-
-      if (highSlopDocs.length > 0) {
-        const totalScore = docs.reduce((acc, doc) => acc + (doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0), 0);
-        return {
-          highSlopCount: highSlopDocs.length,
-          avgScore: Math.round(totalScore / docs.length)
-        };
-      }
-    }
-  } catch (e) {
-    console.error("ZeroSlop: Error checking profile slop", e);
-  }
-  return null;
+    const results = await response.json();
+    const docs = results.filter(r => r.document).map(r => r.document);
+    const score = (doc) => doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0;
+    const highSlopDocs = docs.filter(doc => score(doc) > 15);
+    if (!highSlopDocs.length) return { found: false };
+    const totalScore = docs.reduce((acc, doc) => acc + score(doc), 0);
+    return {
+      found: true,
+      data: { highSlopCount: highSlopDocs.length, avgScore: Math.round(totalScore / docs.length) }
+    };
+  }, { foundTtl: HOUR, missingTtl: HOUR });
 }
 
 function incrementSlopsCaught() {
@@ -602,64 +757,38 @@ function incrementSlopsCaught() {
   });
 }
 
-// In-memory cache for the current session
-const registryCache = new Map();
-
+// Run for every post that scrolls into view, so cached: found for 24 hours, not found for 1.
 async function checkRegistry(tweetId) {
-  // 1. Check in-memory cache first
-  if (registryCache.has(tweetId)) {
-    return registryCache.get(tweetId);
-  }
-
-  // 2. Check chrome storage (persistent across restarts)
-  const storageKey = `cache_${tweetId}`;
-  const stored = await chrome.storage.local.get([storageKey]);
-  if (stored[storageKey]) {
-    const cached = stored[storageKey];
-    // Cache for 24 hours
-    if (Date.now() - cached.timestamp < 24 * 60 * 60 * 1000) {
-      registryCache.set(tweetId, cached.data);
-      return cached.data;
-    }
-  }
-
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}?key=${FIREBASE_CONFIG.apiKey}`;
-
-  try {
-    const response = await fetch(url);
-    if (response.ok) {
-      const doc = await response.json();
-      const fields = doc.fields;
-      const result = {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(String(tweetId))) return null;
+  return cachedLookup(`cache_${tweetId}`, async () => {
+    const { found, doc } = await fetchFirestoreDoc(`slop_registry/${tweetId}`);
+    if (!found) return { found: false };
+    const fields = doc.fields || {};
+    return {
+      found: true,
+      data: {
         ai_score: fields.ai_score?.doubleValue || fields.ai_score?.integerValue || 0,
         status: fields.status?.stringValue,
         upvotes: parseInt(fields.upvotes?.integerValue || 0),
         downvotes: parseInt(fields.downvotes?.integerValue || 0),
         author_handle: fields.author_handle?.stringValue
-      };
-
-      // Store in cache
-      registryCache.set(tweetId, result);
-      chrome.storage.local.set({ [storageKey]: { data: result, timestamp: Date.now() } });
-
-      return result;
-    } else {
-      // If not found, cache the "null" result for 1 hour to prevent re-checking human tweets constantly
-      chrome.storage.local.set({ [storageKey]: { data: null, timestamp: Date.now() - (23 * 60 * 60 * 1000) } });
-    }
-  } catch (e) {}
-  return null;
+      }
+    };
+  }, { foundTtl: 24 * HOUR, missingTtl: HOUR });
 }
 
 async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
   const accountId = author.handle.replace('@', '').toLowerCase();
-  const baseUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
   const commitUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit?key=${FIREBASE_CONFIG.apiKey}`;
 
   try {
-    // Check if new account
-    const getResponse = await fetch(baseUrl);
-    if (!getResponse.ok) {
+    // Check if new account. If the read fails (e.g. quota exceeded), assume it exists, so a
+    // failed read can't count it twice or overwrite its label.
+    let isNew = false;
+    try {
+      isNew = !(await fetchFirestoreDoc(`slop_accounts/${accountId}`)).found;
+    } catch (e) {}
+    if (isNew) {
       updateGlobalStats('total_accounts');
     }
 
@@ -673,7 +802,7 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
     };
     // A report that leaves the account unlabelled ("none") must not replace a label
     // someone else already gave it. Only new accounts get "none" written.
-    if (shield !== 'none' || !getResponse.ok) {
+    if (shield !== 'none' || isNew) {
       fields.shield_type = { stringValue: shield };
     }
 
@@ -707,6 +836,7 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
     });
 
     if (response.ok) {
+      forgetLookup(`acct_${accountId}`);
       console.log(`ZeroSlop: Successfully reported ${shieldType} ${author.handle}`);
       if (shieldType !== 'shield-green') {
         // Increment global slop count for the report
@@ -950,6 +1080,7 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
     
     if (response.ok) {
       console.log(`ZeroSlop: Successfully stored slop tweet ${tweetId}`);
+      forgetLookup(`cache_${tweetId}`);
       
       // Track unique accounts if it's slop
       if (author && author.handle && isSlop) {
@@ -1046,6 +1177,7 @@ async function voteSlopAccount(handle, voteType) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
+    forgetLookup(`acct_${accountId}`);
   } catch (e) {
     console.error("ZeroSlop: Error voting for account (atomic)", e);
   }
@@ -1073,6 +1205,7 @@ async function voteSlopTweet(tweetId, voteType) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
+    forgetLookup(`cache_${tweetId}`);
   } catch (e) {
     console.error("ZeroSlop: Error voting for tweet (atomic)", e);
   }
@@ -1132,6 +1265,7 @@ async function storeSuspiciousAccount(handle, name, pfp, tweetId, factoryHandle 
     });
     if (response.ok) {
       console.log(`ZeroSlop: Successfully stored suspicious account ${handle}`);
+      forgetLookup(`susp_${accountId}`);
     } else {
       const err = await response.text();
       console.error(`ZeroSlop: Commit failed for suspicious: ${err}`);
@@ -1141,18 +1275,12 @@ async function storeSuspiciousAccount(handle, name, pfp, tweetId, factoryHandle 
   }
 }
 
+// Run for every post that scrolls into view, so cached: found for 6 hours, not found for 2.
 async function checkSuspiciousAccount(handle) {
-  const accountId = handle.replace('@', '').toLowerCase();
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}?key=${FIREBASE_CONFIG.apiKey}`;
-
-  try {
-    const response = await fetch(url);
-    if (response.ok) {
-      const doc = await response.json();
-      return {
-        reason_tweet_id: doc.fields.reason_tweet_id?.stringValue
-      };
-    }
-  } catch (e) {}
-  return null;
+  const accountId = accountKey(handle);
+  return cachedLookup(`susp_${accountId}`, async () => {
+    const { found, doc } = await fetchFirestoreDoc(`suspicious_accounts/${accountId}`);
+    if (!found) return { found: false };
+    return { found: true, data: { reason_tweet_id: doc.fields?.reason_tweet_id?.stringValue } };
+  }, { foundTtl: 6 * HOUR, missingTtl: 2 * HOUR });
 }
