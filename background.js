@@ -136,6 +136,13 @@ function scanAmplifiers(tweetId) {
   chrome.tabs.create({ url: retweetUrl, active: false });
 }
 
+// Account shield type -> content-script message that labels the account
+const SHIELD_ACTIONS = {
+  red: "showSlopFactoryWarning",
+  blue: "showHighAIWarning",
+  green: "showOrganicSuccess"
+};
+
 // Handle messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "autoScanTweet") {
@@ -177,17 +184,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.shieldType && request.author) {
       storeSlopFactoryReport(request.author, request.shieldType);
 
-      const actionMap = {
-        'shield-red': "showSlopFactoryWarning",
-        'shield-blue': "showHighAIWarning",
-        'shield-green': "showOrganicSuccess"
-      };
-
-      const action = actionMap[request.shieldType] || "showSlopFactoryWarning";
-      chrome.tabs.sendMessage(sender.tab.id, {
-        action: action,
-        handle: request.author.handle
-      });
+      const action = SHIELD_ACTIONS[request.shieldType.replace('shield-', '')];
+      if (action) {
+        chrome.tabs.sendMessage(sender.tab.id, {
+          action: action,
+          handle: request.author.handle
+        });
+      }
     }
   } else if (request.action === "voteSlop") {
     voteSlopTweet(request.tweetId, request.voteType);
@@ -211,14 +214,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "checkSlopAccount") {
     checkSlopAccount(request.handle).then(data => {
       if (data) {
-        let action = "showSlopFactoryWarning";
-        if (data.shield_type === 'blue') action = "showHighAIWarning";
-        if (data.shield_type === 'green') action = "showOrganicSuccess";
-        
-        chrome.tabs.sendMessage(sender.tab.id, {
-          action: action,
-          handle: request.handle
-        });
+        // Accounts reported as general slop are stored with shield "none": no account label.
+        const action = SHIELD_ACTIONS[data.shield_type];
+        if (action) {
+          chrome.tabs.sendMessage(sender.tab.id, {
+            action: action,
+            handle: request.handle
+          });
+        }
         sendResponse(data);
       } else {
         sendResponse(null);
