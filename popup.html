@@ -1,193 +1,272 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>ZeroSlop Setup</title>
+  <meta name="color-scheme" content="light dark">
+  <title>ZeroSlop</title>
   <style>
-    body { font-family: sans-serif; width: 320px; padding: 15px; margin: 0; }
-    h2 { margin-top: 0; font-size: 1.2rem; }
-    label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9rem; }
-    input { width: 100%; padding: 8px; margin-bottom: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;}
-    button { background-color: #1d9bf0; color: white; border: none; padding: 8px 15px; border-radius: 20px; cursor: pointer; width: 100%; font-weight: bold; margin-bottom: 10px;}
-    button:hover { background-color: #1a8cd8; }
-    .status { margin-top: 5px; font-size: 0.85rem; min-height: 1.2em; }
-    .success { color: green; }
-    .error { color: red; }
-    .onboarding { font-size: 0.85rem; color: #555; margin-bottom: 15px; }
-    .onboarding a { color: #1d9bf0; text-decoration: none; }
-    .onboarding a:hover { text-decoration: underline; }
-    .history-container { max-height: 150px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; padding: 5px; margin-bottom: 10px; font-size: 0.85rem; }
-    .history-item { padding: 5px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;}
-    .history-item:last-child { border-bottom: none; }
-    .history-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
-    .history-score { font-weight: bold; color: #1d9bf0; }
-    .tabs { display: flex; margin-bottom: 15px; border-bottom: 1px solid #ccc; }
-    .tab { flex: 1; text-align: center; padding: 5px; cursor: pointer; color: #777; font-weight: bold; font-size: 0.9rem;}
-    .tab.active { color: #1d9bf0; border-bottom: 2px solid #1d9bf0; }
-    .tab { flex: 1; text-align: center; padding: 8px; cursor: pointer; border-bottom: 2px solid transparent; }
-    .tab.active { border-bottom: 2px solid #1d9bf0; color: #1d9bf0; }
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-    .toggle-container { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; font-size: 0.9rem; font-weight: bold;}
+    :root {
+      --bg: #ffffff; --fg: #0f1419; --muted: #536471; --border: #e6ecf0; --surface: #f7f9f9;
+      --accent: #1d9bf0; --accent-fg: #ffffff; --red: #d91d42; --amber: #a85a00; --green: #00845a;
+      --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+      font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16181c; --fg: #e7e9ea; --muted: #8b98a5; --border: #2f3336; --surface: #202327;
+        --red: #ff5c7a; --amber: #ffb340; --green: #2fd197;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; width: 360px; background: var(--bg); color: var(--fg); }
+    button, input, select { font: inherit; color: inherit; }
+    :focus-visible { outline: none; box-shadow: var(--focus); }
+    a { color: var(--accent); text-decoration: none; font-weight: 600; }
+    a:hover { text-decoration: underline; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+    /* Header */
+    header { padding: 16px 16px 12px; display: flex; align-items: center; gap: 10px; }
+    header img { width: 32px; height: 32px; border-radius: 8px; }
+    .brand { flex: 1; min-width: 0; }
+    .brand h1 { margin: 0; font-size: 16px; font-weight: 800; }
+    .status { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+    .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+    .status.off .dot { background: var(--muted); }
+    .caught { text-align: right; }
+    .caught strong { display: block; font-size: 20px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .caught span { font-size: 11.5px; color: var(--muted); }
+
+    /* Tabs */
+    [role="tablist"] { display: flex; border-bottom: 1px solid var(--border); padding: 0 8px; }
+    [role="tab"] {
+      flex: 1; background: none; border: 0; padding: 10px 0 12px; cursor: pointer; color: var(--muted); font-weight: 600;
+      border-bottom: 3px solid transparent; margin-bottom: -1px; border-radius: 4px 4px 0 0;
+    }
+    [role="tab"]:hover { color: var(--fg); background: var(--surface); }
+    [role="tab"][aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 700; }
+    [role="tabpanel"] { padding: 4px 16px 16px; }
+    [role="tabpanel"][hidden] { display: none; }
+
+    /* Sections and setting rows */
+    .section { padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .section:last-of-type { border-bottom: 0; }
+    .section-title { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--muted); }
+    .setting { display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; cursor: pointer; }
+    .setting-text { flex: 1; min-width: 0; }
+    .setting-name { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+    .setting-desc { font-size: 12.5px; color: var(--muted); margin-top: 1px; }
+    .setting.disabled { cursor: default; opacity: .55; }
+    .tag { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+    .tag.rec { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); background: color-mix(in srgb, var(--green) 10%, transparent); }
+    .tag.warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: color-mix(in srgb, var(--amber) 10%, transparent); }
+
     /* Switch */
-    .switch { position: relative; display: inline-block; width: 34px; height: 20px; }
-    .switch input { opacity: 0; width: 0; height: 0; }
-    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
-    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 2px; bottom: 2px; background-color: white; transition: .4s; border-radius: 50%; }
-    input:checked + .slider { background-color: #1d9bf0; }
-    input:checked + .slider:before { transform: translateX(14px); }
+    .switch { position: relative; flex: none; width: 40px; height: 24px; margin-top: 1px; }
+    .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: inherit; }
+    .switch .track { position: absolute; inset: 0; border-radius: 999px; background: var(--border); transition: background .15s; }
+    .switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; }
+    .switch input:checked + .track { background: var(--accent); }
+    .switch input:checked + .track::after { transform: translateX(16px); }
+    .switch input:focus-visible + .track { box-shadow: var(--focus); }
+    .switch input:disabled + .track { opacity: .6; }
 
-    /* Accordion/Collapsable */
-    .advanced-toggle { cursor: pointer; color: #1d9bf0; font-size: 0.85rem; font-weight: bold; margin-top: 20px; display: flex; align-items: center; justify-content: center; border-top: 1px solid #eee; padding-top: 10px;}
-    .advanced-content { display: none; margin-top: 15px; }
-    .advanced-content.show { display: block; }
+    /* Segmented control */
+    .segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--surface); border-radius: 10px; margin: 6px 0 4px; border: 0; }
+    .segmented label { position: relative; text-align: center; padding: 7px 4px; border-radius: 7px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); }
+    .segmented input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+    .segmented label:has(input:checked) { background: var(--bg); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+    .segmented label:has(input:focus-visible) { box-shadow: var(--focus); }
+    .hint { font-size: 12.5px; color: var(--muted); margin: 4px 0 0; }
 
-    .tutorial-card { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 10px; margin-bottom: 15px; font-size: 0.8rem; line-height: 1.4; }
-    .tutorial-card h3 { margin: 0 0 5px 0; font-size: 0.85rem; color: #0369a1; }
-    .disclaimer { font-size: 0.7rem; color: #666; margin-top: -12px; margin-bottom: 15px; line-height: 1.3; font-style: italic; }
+    .range-row { margin-top: 10px; }
+    .range-row label { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
+    .range-row output { font-variant-numeric: tabular-nums; color: var(--accent); }
+    input[type="range"] { width: 100%; accent-color: var(--accent); margin: 8px 0 0; }
+
+    /* Disclosure sections */
+    details.section > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; border-radius: 6px; }
+    details.section > summary::-webkit-details-marker { display: none; }
+    details.section > summary::after { content: "›"; font-size: 18px; color: var(--muted); transition: transform .15s; }
+    details.section[open] > summary::after { transform: rotate(90deg); }
+    details.section > summary .section-title { margin: 0; }
+    details.section > summary .summary-meta { margin-left: auto; margin-right: 8px; font-size: 12px; color: var(--muted); }
+    details.section > .body { padding-top: 8px; }
+
+    /* Form */
+    .field-label { display: block; font-size: 13px; font-weight: 600; margin: 8px 0 6px; }
+    .input-row { display: flex; gap: 6px; }
+    .input-row input { flex: 1; min-width: 0; }
+    input[type="password"], input[type="text"] { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+    input[type="password"]:focus-visible, input[type="text"]:focus-visible { border-color: var(--accent); }
+    .btn { border: 0; border-radius: 999px; padding: 8px 14px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+    .btn-primary { background: var(--fg); color: var(--bg); }
+    .btn-secondary { background: none; border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--surface); }
+    .btn-danger { background: none; border: 1px solid var(--border); color: var(--red); }
+    .btn-danger.confirming { background: var(--red); border-color: var(--red); color: #fff; }
+    .btn:disabled { opacity: .5; cursor: default; }
+    .field-status { min-height: 18px; font-size: 12.5px; margin-top: 6px; color: var(--muted); }
+    .field-status.ok { color: var(--green); }
+    .field-status.err { color: var(--red); }
+    .callout { font-size: 12.5px; color: var(--muted); background: var(--surface); border-radius: 10px; padding: 10px 12px; margin: 0 0 8px; }
+    .callout kbd { font: inherit; font-weight: 700; color: var(--fg); }
+
+    .steps { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+    .steps li { margin-bottom: 6px; }
+    .steps strong { color: var(--fg); }
+
+    /* History */
+    .history { list-style: none; margin: 8px 0 12px; padding: 0; max-height: 300px; overflow-y: auto; }
+    .history li { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+    .history li:last-child { border-bottom: 0; }
+    .score { flex: none; min-width: 48px; text-align: center; font-weight: 800; font-size: 13px; padding: 4px 6px; border-radius: 8px; font-variant-numeric: tabular-nums; }
+    .score.red { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+    .score.amber { color: var(--amber); background: color-mix(in srgb, var(--amber) 12%, transparent); }
+    .score.green { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+    .history .text { flex: 1; min-width: 0; font-size: 13px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .history .when { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+    .empty { text-align: center; padding: 28px 12px; color: var(--muted); font-size: 13px; }
+    .empty strong { display: block; color: var(--fg); font-size: 14px; margin-bottom: 4px; }
+    .row { display: flex; gap: 8px; }
+    .row .btn { flex: 1; }
+
+    footer { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
   </style>
 </head>
 <body>
-  <div class="tabs">
-    <div class="tab active" data-target="settings">Settings</div>
-    <div class="tab" data-target="history">History</div>
-    <div class="tab" data-target="stats">Stats</div>
+  <header>
+    <img src="icons/icon48.png" alt="">
+    <div class="brand">
+      <h1>ZeroSlop</h1>
+      <div class="status" id="status" role="status"><span class="dot" aria-hidden="true"></span><span id="statusText">Protecting your timeline</span></div>
+    </div>
+    <div class="caught" title="Posts and accounts you scanned or reported that scored over 15% AI">
+      <strong id="slopsCaughtCount">0</strong>
+      <span>slop caught</span>
+    </div>
+  </header>
+
+  <div role="tablist" aria-label="ZeroSlop sections">
+    <button role="tab" id="tab-protection" aria-controls="panel-protection" aria-selected="true">Protection</button>
+    <button role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1">History</button>
   </div>
 
-  <div id="settings" class="tab-content active">
-    <div class="tutorial-card">
-      <h3>🛡️ The ZeroSlop Defense Strategy</h3>
-      <p style="margin-top: 5px;">We protect your timeline using 4 layers of defense:</p>
-      <ul style="padding-left: 15px; margin: 5px 0;">
-        <li><strong>Layer 1: Community Shield</strong> (Free) - Blocks known slop from our registry.</li>
-        <li><strong>Layer 2: Bounty Hunter</strong> (Free) - Highlights 72% of slop via local rules.</li>
-        <li><strong>Layer 3: Smart Slop Guard</strong> (Free) - Uses ML to catch "sneaky" slop patterns.</li>
-        <li><strong>Layer 4: Deep Forensic Scan</strong> (Paid) - Uses ZeroGPT API for 99% certainty.</li>
-      </ul>
-      <div style="margin-top: 8px; border-top: 1px solid #bae6fd; padding-top: 8px;">
-        <strong>AI Slop</strong>: Generic content designed to farm engagement.<br>
-        <strong>Slop Factory</strong>: Accounts that mass-produce slop industrially.
+  <main>
+    <section role="tabpanel" id="panel-protection" aria-labelledby="tab-protection">
+      <div class="section">
+        <h2 class="section-title">Detection</h2>
+
+        <label class="setting">
+          <span class="setting-text">
+            <span class="setting-name">Community registry <span class="tag rec">Recommended</span></span>
+            <span class="setting-desc">Labels posts and accounts other users have already confirmed as slop.</span>
+          </span>
+          <span class="switch"><input type="checkbox" id="communityShieldToggle"><span class="track"></span></span>
+        </label>
+
+        <label class="setting">
+          <span class="setting-text">
+            <span class="setting-name">Highlight bait phrases</span>
+            <span class="setting-desc">Underlines hooks like “7 prompts” or “$10k/mo”. Hover one to see why.</span>
+          </span>
+          <span class="switch"><input type="checkbox" id="hunterVisionToggle"><span class="track"></span></span>
+        </label>
+
+        <label class="setting">
+          <span class="setting-text">
+            <span class="setting-name">Smart Slop Guard <span class="tag">Beta</span></span>
+            <span class="setting-desc">An on-device model flags posts that look like they come from slop factories.</span>
+          </span>
+          <span class="switch"><input type="checkbox" id="autoHumanDetectionToggle"><span class="track"></span></span>
+        </label>
       </div>
-      <div style="margin-top: 8px; font-size: 0.75rem; color: #0369a1; background: #e0f2fe; padding: 6px; border-radius: 4px;">
-        🚀 <strong>Community Powered</strong>: Every scan helps train the Smart Slop Guard. The more we hunt, the better the free model becomes.
-      </div>
-      <div style="margin-top: 8px; font-size: 0.7rem; color: #666; font-style: italic;">
-        🔒 <strong>Privacy First</strong>: Anonymous slop detection is the ONLY data we collect. No personal info, no fingerprinting, no tracking, and no data selling.
-      </div>
-    </div>
 
-    <div class="toggle-container" style="margin-bottom: 5px;">
-      <span>Layer 1: Community Shield (Recommended)</span>
-      <label class="switch">
-        <input type="checkbox" id="communityShieldToggle">
-        <span class="slider"></span>
-      </label>
-    </div>
-    <div class="disclaimer">
-      Free. Checks tweets against the community registry of known slop.
-    </div>
+      <div class="section">
+        <h2 class="section-title" id="actionLabel">When slop is found</h2>
+        <fieldset class="segmented" aria-labelledby="actionLabel" id="slopAction">
+          <label><input type="radio" name="slopAction" value="none">Label only</label>
+          <label><input type="radio" name="slopAction" value="blur">Blur</label>
+          <label><input type="radio" name="slopAction" value="zap">Hide</label>
+        </fieldset>
+        <p class="hint" id="actionHint"></p>
 
-    <div class="toggle-container" style="margin-bottom: 5px;">
-      <span>Layer 2: Bounty Hunter Vision</span>
-      <label class="switch">
-        <input type="checkbox" id="hunterVisionToggle">
-        <span class="slider"></span>
-      </label>
-    </div>
-    <div class="disclaimer">
-      Free. Highlights engagement-farming patterns (like 'X prompts' or '$10k/mo') in red.
-    </div>
-
-    <div class="toggle-container" style="margin-bottom: 5px;">
-      <span>Layer 3: Smart Slop Guard (Beta)</span>
-      <label class="switch">
-        <input type="checkbox" id="autoHumanDetectionToggle">
-        <span class="slider"></span>
-      </label>
-    </div>
-    <div class="disclaimer">
-      Free. Uses a local pattern-matching model to detect the "structural DNA" of slop factories.
-    </div>
-
-    <div class="advanced-toggle" id="advancedToggle">
-      ⚙️ Advanced & Paid Settings ▾
-    </div>
-
-    <div class="advanced-content" id="advancedContent">
-      <h3 style="font-size: 0.9rem; margin-top: 0; color: #1d9bf0;">Layer 4: Deep Forensic Scan (Paid)</h3>
-      <div class="onboarding" style="margin-bottom: 10px;">
-        <div style="font-size: 0.75rem; color: #666; margin-bottom: 10px; background: #fffbeb; padding: 8px; border: 1px solid #fef3c7; border-radius: 6px;">
-          ⚠️ <strong>Subscription Required</strong>: Deep scans require a ZeroGPT.com API key which costs credits.
+        <div class="range-row" id="thresholdRow">
+          <label for="thresholdSlider">Only for posts scoring at least <output id="thresholdVal" for="thresholdSlider">85%</output></label>
+          <input type="range" id="thresholdSlider" min="20" max="100" step="5" value="85" aria-describedby="thresholdHint">
+          <p class="hint" id="thresholdHint">Known slop factories always count as 100%.</p>
         </div>
-        <label for="apiKey">ZeroGPT API Key:</label>
-        <input type="password" id="apiKey" placeholder="Enter your API Key">
-        <button id="saveBtn">Save API Key</button>
-        <div id="status" class="status"></div>
-      </div>
 
-      <label for="slopAction">Slop Action (Threshold Met):</label>
-      <select id="slopAction" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc; margin-bottom: 10px; font-size: 0.9rem;">
-        <option value="none">Show Badge Only</option>
-        <option value="blur" selected>Blur Content (Default)</option>
-        <option value="zap">Zap (Remove from Timeline)</option>
-      </select>
-
-      <div style="margin-bottom: 15px; font-size: 0.85rem; color: #555;">
-        Action threshold: <span id="thresholdVal">85</span>%
-        <input type="range" id="thresholdSlider" min="0" max="100" value="85" style="width: 100%; margin-top: 5px;">
-      </div>
-
-      <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
-
-      <div class="toggle-container" style="margin-bottom: 5px;">
-        <span>Layer 4: Auto-Scan with ZeroGPT API</span>
-        <label class="switch">
-          <input type="checkbox" id="autoScanToggle">
-          <span class="slider"></span>
+        <label class="setting" style="margin-top: 6px;">
+          <span class="setting-text">
+            <span class="setting-name">Profile alerts</span>
+            <span class="setting-desc">Show a single notice when you open a flagged account’s profile. Timeline posts only ever get a small label.</span>
+          </span>
+          <span class="switch"><input type="checkbox" id="profileAlertsToggle"><span class="track"></span></span>
         </label>
       </div>
-      <div class="disclaimer" style="color: #dc3545; border: 1px solid #dc3545; padding: 8px; border-radius: 4px; margin-top: 5px;">
-        ⚠️ <strong>Uses API Credits</strong>: Automatically scans every tweet with ZeroGPT. Credits consumed quickly on active timelines.
+
+      <details class="section" id="deepScan">
+        <summary><h2 class="section-title">Deep scan with ZeroGPT</h2><span class="summary-meta" id="keyBadge">Not set up</span></summary>
+        <div class="body">
+          <p class="callout">Right-click any post on X and choose <kbd>ZeroSlop → Check with ZeroGPT</kbd> for a full AI score. Deep scans need your own paid ZeroGPT API key.</p>
+          <label class="field-label" for="apiKey">ZeroGPT API key</label>
+          <div class="input-row">
+            <input type="password" id="apiKey" placeholder="Paste your API key" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn btn-secondary" id="toggleKey" aria-pressed="false" aria-label="Show API key">Show</button>
+            <button type="button" class="btn btn-primary" id="saveBtn">Save</button>
+          </div>
+          <div class="field-status" id="keyStatus" role="status"></div>
+
+          <label class="setting" id="autoScanRow">
+            <span class="setting-text">
+              <span class="setting-name">Auto-scan every post <span class="tag warn">Uses credits</span></span>
+              <span class="setting-desc">Sends each post you scroll past to ZeroGPT. A busy timeline can use up credits quickly.</span>
+            </span>
+            <span class="switch"><input type="checkbox" id="autoScanToggle"><span class="track"></span></span>
+          </label>
+        </div>
+      </details>
+
+      <details class="section">
+        <summary><h2 class="section-title">How it works</h2></summary>
+        <div class="body">
+          <ol class="steps">
+            <li><strong>Labels, not alarms.</strong> Flagged posts get a small coloured label next to the timestamp. Click it to see why and to vote on whether it’s right.</li>
+            <li><strong>Red</strong> means slop factory (bot networks, funnels), <strong>blue</strong> means high AI use, <strong>amber</strong> means suspicious or unverified, and <strong>green</strong> means human.</li>
+            <li><strong>Report from anywhere.</strong> Right-click a post and open the ZeroSlop menu to scan or report it.</li>
+            <li><strong>Private by design.</strong> The only thing shared is anonymous slop reports. No personal info, no tracking.</li>
+          </ol>
+        </div>
+      </details>
+
+      <details class="section">
+        <summary><h2 class="section-title">Developer</h2></summary>
+        <div class="body">
+          <label class="setting">
+            <span class="setting-text">
+              <span class="setting-name">Organic data collection <span class="tag warn">Uses credits</span></span>
+              <span class="setting-desc">Auto-scans posts with ZeroGPT and shows labelling badges for building the training dataset.</span>
+            </span>
+            <span class="switch"><input type="checkbox" id="adminOrganicToggle"><span class="track"></span></span>
+          </label>
+        </div>
+      </details>
+    </section>
+
+    <section role="tabpanel" id="panel-history" aria-labelledby="tab-history" hidden>
+      <ul class="history" id="historyList" aria-label="Recent scans"></ul>
+      <div class="row" id="historyActions">
+        <button type="button" class="btn btn-secondary" id="exportBtn">Export CSV</button>
+        <button type="button" class="btn btn-danger" id="clearHistoryBtn">Clear history</button>
       </div>
+    </section>
+  </main>
 
-      <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0;">
-
-      <div class="toggle-container" style="margin-bottom: 5px;">
-        <span style="color: #dc3545; font-weight: bold;">🔧 Admin: Organic Data Collection</span>
-        <label class="switch">
-          <input type="checkbox" id="adminOrganicToggle">
-          <span class="slider"></span>
-        </label>
-      </div>
-      <div class="disclaimer" style="color: #dc3545; border: 1px solid #dc3545; padding: 8px; border-radius: 4px; margin-top: 5px;">
-        ⚠️ <strong>Developer Tool Only</strong>: Auto-scans all tweets via ZeroGPT API. Shows voting badges to collect organic-human labeled data. Uses API credits rapidly.
-      </div>
-    </div>
-  </div>
-
-  <div id="history" class="tab-content">
-    <h2>Scan History</h2>
-    <div class="history-container" id="historyList">
-      <!-- History items will be inserted here -->
-    </div>
-    <button id="exportBtn" style="background-color: #17a2b8;">Export Results (CSV)</button>
-    <button id="clearHistoryBtn" style="background-color: #dc3545;">Clear History</button>
-  </div>
-
-  <div id="stats" class="tab-content">
-    <h2>Hunter Dashboard</h2>
-    <div style="background: #f8f9fa; padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #eee;">
-      <div style="font-size: 0.9rem; color: #666; margin-bottom: 10px;">Total Slops You've Caught</div>
-      <div id="slopsCaughtCount" style="font-size: 3rem; font-weight: bold; color: #1d9bf0;">0</div>
-      <div style="font-size: 0.8rem; color: #888; margin-top: 10px;">Scans or reports with >15% AI score</div>
-    </div>
-    <div style="margin-top: 20px; font-size: 0.85rem; color: #555; line-height: 1.4;">
-      Keep hunting! Every slop you catch helps clean up the timeline for everyone. 🛡️
-    </div>
-    <div style="margin-top: 15px; text-align: center;">
-      <a href="https://woodrock.github.io/zero-slop" target="_blank" style="color: #1d9bf0; text-decoration: none; font-size: 0.9rem; font-weight: bold;">🌐 View Community Registry</a>
-    </div>
-  </div>
+  <footer>
+    <a href="https://woodrock.github.io/zero-slop" target="_blank" rel="noopener">Community registry ↗</a>
+    <span id="version"></span>
+  </footer>
 
   <script src="popup.js"></script>
 </body>

@@ -1,600 +1,1089 @@
-let lastRightClickedElement = null;
+/*
+ * ZeroSlop content script.
+ *
+ * UI principles used throughout this file:
+ *  - Quiet by default: one small badge per post, never a page-wide banner.
+ *  - Details on demand: the badge opens a popover with the reason and voting.
+ *  - Account-level alerts only appear on that account's own profile, at most once per session.
+ *  - Everything ZeroSlop does to the page can be undone (blurred or hidden posts can be shown).
+ */
 
-// Track right-click position to find the element
+const ZS_VERSION = chrome.runtime.getManifest().version;
+const ZS_REGISTRY_URL = 'https://woodrock.github.io/zero-slop';
+const ZS_STATUS_URL = 'https://x.com/i/status/';
+const ZS_AI_FLAG_THRESHOLD = 15; // Scores at or below this are treated as human.
+const NON_PROFILE_PATHS = ['home', 'explore', 'notifications', 'messages', 'search', 'settings', 'i', 'compose', 'jobs', 'communities'];
+
+let lastRightClickedElement = null;
+let currentOverlayInfo = null;
+
 document.addEventListener('contextmenu', (event) => {
   lastRightClickedElement = event.target;
 }, true);
 
-// Global to store the last detection result for the current tweet/profile
-let currentOverlayInfo = null;
+// ---------------------------------------------------------------------------
+// Settings (cached so we don't hit storage for every post on screen)
+// ---------------------------------------------------------------------------
 
-// Listen for storage changes to handle toggle updates in real-time
-chrome.storage.onChanged.addListener((changes, namespace) => {
-  if (namespace === 'local') {
-    if (changes.autoHumanDetection) {
-      // Remove all Smart Slop badges if disabled
-      if (!changes.autoHumanDetection.newValue) {
-        document.querySelectorAll('.zeroslop-smart-badge').forEach(badge => badge.remove());
-      }
+const zsSettings = {
+  communityShield: true,
+  hunterVision: false,
+  autoHumanDetection: false,
+  autoScan: false,
+  adminOrganicCollection: false,
+  profileAlerts: true,
+  slopAction: 'blur',
+  hideThreshold: 85
+};
+
+const zsSettingsReady = new Promise((resolve) => {
+  chrome.storage.local.get(Object.keys(zsSettings), (stored) => {
+    for (const key of Object.keys(zsSettings)) {
+      if (stored[key] !== undefined) zsSettings[key] = stored[key];
     }
+    resolve();
+  });
+});
+
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace !== 'local') return;
+  for (const key of Object.keys(zsSettings)) {
+    if (changes[key]) zsSettings[key] = changes[key].newValue ?? zsSettings[key];
+  }
+  if (changes.autoHumanDetection && !changes.autoHumanDetection.newValue) {
+    document.querySelectorAll('.zs-badge[data-kind="smart"]').forEach(b => b.remove());
+  }
+  if (changes.hunterVision && !changes.hunterVision.newValue) {
+    document.querySelectorAll('mark.zs-mark').forEach(m => m.replaceWith(document.createTextNode(m.textContent)));
+  }
+  if (changes.profileAlerts && !changes.profileAlerts.newValue) {
+    document.querySelectorAll('.zs-toast[data-notice]').forEach(n => n.remove());
   }
 });
 
-// Listen for messages from background script
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log(`ZeroSlop: Received action ${request.action}`);
-  
-  if (request.action === "getTweetText") {
-    const info = extractTweetInfo(lastRightClickedElement);
-    sendResponse(info);
-  } else if (request.action === "getThreadText") {
-    const info = extractThreadInfo(lastRightClickedElement);
-    sendResponse(info);
-  } else if (request.action === "getProfileText") {
-    const info = extractProfileInfo(lastRightClickedElement);
-    sendResponse(info);
-  } else if (request.action === "showLoader") {
-    showOverlay("Analyzing text with ZeroGPT...");
-  } else if (request.action === "showResult") {
-    const data = request.data;
-    const isAutoScan = request.isAutoScan;
-    
-    // Store info for buttons
-    if (!isAutoScan) {
-      const activeElement = lastRightClickedElement;
-      if (data.feedback_message?.includes("Thread Analysis")) {
-        currentOverlayInfo = extractThreadInfo(activeElement);
-      } else if (!request.tweetId) {
-        currentOverlayInfo = extractProfileInfo(activeElement);
-      } else {
-        currentOverlayInfo = extractTweetInfo(activeElement);
-      }
-      
-      const message = `AI Generation: ${data.fakePercentage || 0}%\n` +
-                      `Status: ${data.feedback_message || "Analyzed"}\n` +
-                      `Words: ${data.textWords || 0}`;
-      showOverlay(message, "success", data.fakePercentage);
-    }
-    
-    const container = request.tweetId ? null : getTweetContainer(lastRightClickedElement);
-    injectBadge(request.tweetId || container, data.fakePercentage || 0, data.upvotes || 0, data.downvotes || 0);
-  } else if (request.action === "adminShowBadge") {
-    const { percentage, tweetId, author } = request.data;
-    console.log(`ZeroSlop Admin: Badge request for tweet ${tweetId} at ${percentage}%`);
-    const container = getTweetContainerByTweetId(tweetId);
+// ---------------------------------------------------------------------------
+// Styles and theme
+// ---------------------------------------------------------------------------
 
-    if (!container) {
-      console.warn(`ZeroSlop Admin: Could not find container for tweet ${tweetId}`);
+const ZS_STYLES = `
+  html {
+    --zs-bg: #ffffff; --zs-fg: #0f1419; --zs-muted: #536471; --zs-border: #e6ecf0;
+    --zs-surface: #f7f9f9; --zs-shadow: 0 10px 30px rgba(15, 20, 25, .16), 0 0 0 1px rgba(15, 20, 25, .06);
+    --zs-red: #d91d42; --zs-amber: #a85a00; --zs-blue: #1a8cd8; --zs-green: #00845a; --zs-gray: #536471;
+    --zs-accent: #1d9bf0;
+    --zs-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  html[data-zs-theme="dark"] {
+    --zs-bg: #16181c; --zs-fg: #e7e9ea; --zs-muted: #8b98a5; --zs-border: #2f3336;
+    --zs-surface: #202327; --zs-shadow: 0 10px 30px rgba(0, 0, 0, .55), 0 0 0 1px #2f3336;
+    --zs-red: #ff5c7a; --zs-amber: #ffb340; --zs-blue: #4cb3ff; --zs-green: #2fd197; --zs-gray: #8b98a5;
+  }
+  .zs-tone-red { --zs-tone: var(--zs-red); }
+  .zs-tone-amber { --zs-tone: var(--zs-amber); }
+  .zs-tone-blue { --zs-tone: var(--zs-blue); }
+  .zs-tone-green { --zs-tone: var(--zs-green); }
+  .zs-tone-gray { --zs-tone: var(--zs-gray); }
+
+  /* Badge: one quiet pill next to the timestamp */
+  .zs-badge {
+    all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 5px;
+    height: 20px; padding: 0 8px; margin-left: 6px; border-radius: 999px;
+    font: 600 11.5px/1 var(--zs-font); letter-spacing: .01em; white-space: nowrap; vertical-align: middle;
+    color: var(--zs-tone); background: color-mix(in srgb, var(--zs-tone) 13%, transparent);
+    cursor: pointer; transition: background-color .15s ease;
+  }
+  .zs-badge:hover { background: color-mix(in srgb, var(--zs-tone) 22%, transparent); }
+  .zs-badge:focus-visible { outline: 2px solid var(--zs-tone); outline-offset: 2px; }
+  .zs-badge-lg { height: 26px; padding: 0 11px; margin: 6px 0 0; font-size: 13px; }
+  .zs-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+
+  /* Shared surface for popover, toasts and result card */
+  .zs-surface {
+    box-sizing: border-box; font: 400 14px/1.4 var(--zs-font); color: var(--zs-fg);
+    background: var(--zs-bg); border-radius: 14px; box-shadow: var(--zs-shadow);
+  }
+  .zs-surface *, .zs-surface *::before, .zs-surface *::after { box-sizing: border-box; }
+  .zs-title { font-weight: 700; font-size: 15px; margin: 0; display: flex; align-items: center; gap: 8px; }
+  .zs-muted { color: var(--zs-muted); font-size: 13px; }
+  .zs-eyebrow { color: var(--zs-muted); font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+  .zs-surface a { color: var(--zs-accent); text-decoration: none; font-weight: 600; }
+  .zs-surface a:hover { text-decoration: underline; }
+
+  .zs-btn {
+    all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 34px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+    font: 700 13.5px/1 var(--zs-font); text-align: center; transition: filter .15s ease, background-color .15s ease;
+  }
+  .zs-btn:focus-visible { outline: 2px solid var(--zs-accent); outline-offset: 2px; }
+  .zs-btn:disabled { opacity: .55; cursor: default; }
+  .zs-btn-primary { background: var(--zs-fg); color: var(--zs-bg); }
+  .zs-btn-danger { background: var(--zs-red); color: #fff; }
+  .zs-btn-primary:hover:not(:disabled), .zs-btn-danger:hover:not(:disabled) { filter: brightness(1.1); }
+  .zs-btn-secondary { border: 1px solid var(--zs-border); color: var(--zs-fg); }
+  .zs-btn-secondary:hover:not(:disabled) { background: var(--zs-surface); }
+  .zs-btn-ghost { color: var(--zs-accent); padding: 0 8px; min-height: 28px; font-weight: 600; }
+  .zs-btn-ghost:hover:not(:disabled) { background: color-mix(in srgb, var(--zs-accent) 10%, transparent); }
+  .zs-icon-btn {
+    all: unset; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    color: var(--zs-muted); cursor: pointer; font: 400 20px/1 var(--zs-font); flex: none;
+  }
+  .zs-icon-btn:hover { background: var(--zs-surface); color: var(--zs-fg); }
+  .zs-icon-btn:focus-visible { outline: 2px solid var(--zs-accent); }
+
+  /* Popover */
+  .zs-popover { position: fixed; z-index: 2147483646; width: 290px; padding: 14px; animation: zsFade .12s ease-out; }
+  .zs-popover .zs-desc { margin: 6px 0 0; color: var(--zs-muted); font-size: 13px; }
+  .zs-popover .zs-meta { margin-top: 8px; font-size: 12px; color: var(--zs-muted); }
+  .zs-popover .zs-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .zs-popover .zs-actions .zs-btn { min-height: 30px; font-size: 13px; padding: 0 12px; }
+  .zs-popover .zs-footer { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--zs-border); font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+
+  /* Toasts */
+  .zs-toasts {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 2147483646;
+    display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: min(420px, calc(100vw - 32px));
+  }
+  .zs-toast {
+    pointer-events: auto; width: 100%; padding: 12px 10px 12px 16px; display: flex; align-items: flex-start; gap: 12px;
+    animation: zsRise .18s ease-out; border-left: 4px solid var(--zs-tone, var(--zs-accent));
+  }
+  .zs-toast .zs-toast-body { flex: 1; min-width: 0; padding-top: 3px; }
+  .zs-toast .zs-toast-title { font-weight: 700; }
+  .zs-toast .zs-toast-text { color: var(--zs-muted); font-size: 13px; margin-top: 2px; }
+  .zs-toast .zs-toast-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0 -8px; }
+  .zs-toast.zs-leaving { opacity: 0; transform: translateY(6px); transition: opacity .2s, transform .2s; }
+
+  /* Result card */
+  .zs-card { position: fixed; top: 72px; right: 20px; z-index: 2147483646; width: 330px; max-height: calc(100vh - 96px); overflow-y: auto; padding: 16px; animation: zsFade .15s ease-out; }
+  .zs-card-head { display: flex; align-items: center; justify-content: space-between; margin: -4px -6px 10px 0; }
+  .zs-score { display: flex; align-items: baseline; gap: 10px; }
+  .zs-score-num { font-size: 40px; font-weight: 800; line-height: 1; color: var(--zs-tone); font-variant-numeric: tabular-nums; }
+  .zs-score-label { font-weight: 700; font-size: 15px; }
+  .zs-meter { height: 6px; border-radius: 999px; background: var(--zs-surface); overflow: hidden; margin: 12px 0 6px; }
+  .zs-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--zs-tone); }
+  .zs-stack { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+  .zs-row { display: flex; gap: 8px; }
+  .zs-row > .zs-btn { flex: 1; }
+  .zs-details { border: 1px solid var(--zs-border); border-radius: 12px; padding: 0 12px; }
+  .zs-details[open] { padding-bottom: 12px; }
+  .zs-details summary { cursor: pointer; padding: 10px 0; font-size: 13px; font-weight: 600; color: var(--zs-muted); list-style: none; }
+  .zs-details summary::-webkit-details-marker { display: none; }
+  .zs-details summary::after { content: "▾"; float: right; }
+  .zs-details[open] summary::after { content: "▴"; }
+  .zs-details summary:focus-visible { outline: 2px solid var(--zs-accent); border-radius: 4px; }
+  .zs-field-label { display: block; font-size: 12px; font-weight: 700; color: var(--zs-muted); margin: 10px 0 6px; }
+  .zs-select {
+    width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--zs-border);
+    background: var(--zs-bg); color: var(--zs-fg); font: 400 13px var(--zs-font);
+  }
+  .zs-hint { font-size: 12px; color: var(--zs-muted); margin-top: 6px; }
+  .zs-check { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; cursor: pointer; }
+  .zs-check input { margin: 0; accent-color: var(--zs-accent); }
+  .zs-confirm { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; font-weight: 600;
+    color: var(--zs-green); background: color-mix(in srgb, var(--zs-green) 12%, transparent); }
+  .zs-loading { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+  .zs-spinner { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--zs-border); border-top-color: var(--zs-accent); animation: zsSpin .8s linear infinite; flex: none; }
+
+  /* Hunter Vision highlights: noticeable without shouting */
+  mark.zs-mark { background: none; color: inherit; cursor: help; text-decoration-line: underline; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
+  mark.zs-mark-hard { text-decoration-color: var(--zs-red); text-decoration-style: wavy; background: color-mix(in srgb, var(--zs-red) 8%, transparent); border-radius: 3px; }
+  mark.zs-mark-soft { text-decoration-color: var(--zs-amber); text-decoration-style: dotted; }
+
+  /* Blur and hide actions (both reversible) */
+  .zs-veiled { position: relative; min-height: 44px; }
+  .zs-veiled > :not(.zs-reveal) { filter: blur(7px); opacity: .5; pointer-events: none; user-select: none; }
+  .zs-reveal {
+    all: unset; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    font: 600 13px var(--zs-font); color: var(--zs-fg); z-index: 1;
+  }
+  .zs-reveal span { background: var(--zs-bg); box-shadow: var(--zs-shadow); padding: 7px 14px; border-radius: 999px; }
+  .zs-reveal:focus-visible span { outline: 2px solid var(--zs-accent); }
+  .zs-zapped { display: none !important; }
+  .zs-zap-note {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px;
+    font: 400 13px var(--zs-font); color: var(--zs-muted); border-bottom: 1px solid var(--zs-border);
+  }
+  .zs-zap-note button { all: unset; cursor: pointer; color: var(--zs-accent); font-weight: 600; }
+  .zs-zap-note button:focus-visible { outline: 2px solid var(--zs-accent); }
+  .zs-zapping { animation: zsDust .6s ease-in forwards; pointer-events: none; }
+
+  .zs-audit-btn {
+    all: unset; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; width: calc(100% - 32px);
+    margin: 10px 16px; min-height: 38px; border-radius: 999px; border: 1px solid var(--zs-border); cursor: pointer;
+    font: 700 14px var(--zs-font); color: var(--zs-fg);
+  }
+  .zs-audit-btn:hover { background: var(--zs-surface); }
+  .zs-audit-btn:focus-visible { outline: 2px solid var(--zs-accent); }
+
+  @keyframes zsFade { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes zsRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes zsSpin { to { transform: rotate(360deg); } }
+  @keyframes zsDust {
+    0% { opacity: 1; filter: none; transform: none; }
+    100% { opacity: 0; filter: blur(12px) grayscale(1) sepia(.6); transform: translateX(40px) scale(.97); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .zs-popover, .zs-toast, .zs-card { animation: none; }
+    .zs-zapping { animation-duration: .01s; }
+    .zs-spinner { animation-duration: 2s; }
+  }
+`;
+
+function injectStyles() {
+  if (document.getElementById('zs-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'zs-styles';
+  style.textContent = ZS_STYLES;
+  (document.head || document.documentElement).appendChild(style);
+}
+
+/** Match X's own theme (light, dim or lights out) by reading the page background. */
+function syncTheme() {
+  const bg = document.body ? getComputedStyle(document.body).backgroundColor : '';
+  const parts = (bg.match(/[\d.]+/g) || []).map(Number);
+  let dark;
+  if (parts.length >= 3 && (parts.length < 4 || parts[3] > 0)) {
+    dark = (0.299 * parts[0] + 0.587 * parts[1] + 0.114 * parts[2]) < 128;
+  } else {
+    dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }
+  document.documentElement.dataset.zsTheme = dark ? 'dark' : 'light';
+}
+
+// ---------------------------------------------------------------------------
+// Small helpers
+// ---------------------------------------------------------------------------
+
+function el(tag, attrs = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value === undefined || value === null || value === false) continue;
+    if (key === 'class') node.className = value;
+    else if (key === 'text') node.textContent = value;
+    else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value === true ? '' : value);
+  }
+  for (const child of [].concat(children)) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+function stop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+function normHandle(handle) {
+  return (handle || '').replace(/^@/, '').toLowerCase();
+}
+
+function currentProfileHandle() {
+  const first = window.location.pathname.split('/').filter(Boolean)[0];
+  if (!first || NON_PROFILE_PATHS.includes(first.toLowerCase())) return null;
+  return first.toLowerCase();
+}
+
+function isCurrentProfile(handle) {
+  return !!handle && currentProfileHandle() === normHandle(handle);
+}
+
+function mapUrl(handle) {
+  return `${ZS_REGISTRY_URL}?search=${encodeURIComponent(normHandle(handle))}`;
+}
+
+function statusUrl(tweetId) {
+  return `${ZS_STATUS_URL}${tweetId}`;
+}
+
+function scoreTone(pct) {
+  if (pct >= 70) return 'red';
+  if (pct > ZS_AI_FLAG_THRESHOLD) return 'amber';
+  return 'green';
+}
+
+function scoreVerdict(pct) {
+  if (pct >= 70) return 'Likely AI-generated';
+  if (pct >= 30) return 'Mixed signals';
+  if (pct > ZS_AI_FLAG_THRESHOLD) return 'Some AI signals';
+  return 'Likely human-written';
+}
+
+// ---------------------------------------------------------------------------
+// Badges: one per post, the highest-priority signal wins
+// ---------------------------------------------------------------------------
+
+const BADGE_KINDS = {
+  factory: {
+    priority: 50, tone: 'red', label: 'Slop factory', title: 'Known slop factory',
+    desc: 'The community flagged this account for mass-producing engagement-farming posts.'
+  },
+  highai: {
+    priority: 40, tone: 'blue', label: 'High AI use', title: 'High AI usage',
+    desc: 'The community flagged this account for posting lots of AI-generated content, without the bot-network tactics of a slop factory.'
+  },
+  score: { priority: 30, title: 'AI detection score' },
+  suspicious: {
+    priority: 20, tone: 'amber', label: 'Suspicious', title: 'Possible amplifier bot',
+    desc: 'This account recently retweeted or quoted a confirmed slop factory.'
+  },
+  smart: {
+    priority: 10, tone: 'amber', label: 'Slop signal', title: 'Smart Slop Guard signal',
+    desc: 'The on-device model spotted patterns common in engagement farming. Nobody has verified this yet, so treat it as a hint.'
+  },
+  organic: {
+    priority: 5, tone: 'green', label: 'Human', title: 'Verified human',
+    desc: 'The community verified this account as an organic human poster.'
+  }
+};
+
+const zsVotes = new Map(); // key -> 'up' | 'down', remembered for this page session
+
+function voteActions(key, send) {
+  const voted = zsVotes.get(key);
+  if (voted) {
+    return [{ label: voted === 'up' ? '✓ You said this looks right' : '✓ You said this looks wrong', disabled: true }];
+  }
+  const vote = (type) => (btn, pop) => {
+    zsVotes.set(key, type);
+    send(type);
+    pop.querySelector('.zs-actions').replaceChildren(
+      el('div', { class: 'zs-muted', role: 'status', text: 'Thanks, your vote helps everyone.' })
+    );
+  };
+  return [
+    { label: '👍 Looks right', onClick: vote('up') },
+    { label: '👎 Looks wrong', onClick: vote('down') }
+  ];
+}
+
+function accountVoteActions(handle) {
+  return voteActions(`acct:${normHandle(handle)}`, (voteType) => {
+    chrome.runtime.sendMessage({ action: 'voteAccount', handle, voteType });
+  });
+}
+
+/**
+ * Put (or upgrade) the ZeroSlop badge on a host element.
+ * spec: { kind, label, tone, title, desc, meta, priority, replace, actions: () => [...], link: {href, text} }
+ */
+function setBadge(host, spec, { large = false, insert } = {}) {
+  if (!host) return null;
+  const base = BADGE_KINDS[spec.kind] || {};
+  const full = { ...base, ...spec, priority: spec.priority ?? base.priority ?? 0 };
+  const existing = host.querySelector('.zs-badge');
+
+  if (existing) {
+    const existingPriority = Number(existing.dataset.priority);
+    if (existingPriority > full.priority) return existing;
+    if (existingPriority === full.priority && existing.dataset.kind === full.kind && !spec.replace) return existing;
+  }
+
+  const badge = el('button', {
+    type: 'button',
+    class: `zs-badge zs-tone-${full.tone || 'gray'}${large ? ' zs-badge-lg' : ''}`,
+    'data-kind': full.kind,
+    'data-priority': full.priority,
+    'aria-haspopup': 'dialog',
+    'aria-expanded': 'false',
+    'aria-label': `ZeroSlop: ${full.title || full.label}. Show details`
+  }, [el('span', { class: 'zs-dot', 'aria-hidden': 'true' }), full.label]);
+  badge._zsSpec = full;
+  badge.addEventListener('click', (e) => { stop(e); togglePopover(badge); });
+  badge.addEventListener('mousedown', (e) => e.stopPropagation());
+
+  if (existing) {
+    if (zsPopover && zsPopover._anchor === existing) closePopover();
+    existing.replaceWith(badge);
+  } else if (insert) {
+    insert(badge);
+  } else {
+    const time = host.querySelector('time');
+    const anchor = time ? (time.closest('a') || time) : null;
+    if (anchor && host.contains(anchor)) {
+      anchor.after(badge);
+    } else {
+      const nameRow = host.querySelector('[data-testid="User-Name"]');
+      if (!nameRow) return null;
+      nameRow.appendChild(badge);
+    }
+  }
+  return badge;
+}
+
+function tweetsByHandle(handle) {
+  const target = normHandle(handle);
+  return Array.from(document.querySelectorAll('article')).filter((article) => {
+    return normHandle(extractTweetInfo(article).author?.handle) === target;
+  });
+}
+
+function setProfileHeaderBadge(kind, handle) {
+  if (!isCurrentProfile(handle)) return;
+  const header = document.querySelector('[data-testid="UserName"]');
+  if (!header) return;
+  setBadge(header, {
+    kind,
+    actions: () => accountVoteActions(handle),
+    link: kind === 'factory' ? { href: mapUrl(handle), text: 'View network map' } : null
+  }, {
+    large: true,
+    insert: (b) => header.appendChild(el('div', { class: 'zs-header-badge' }, [b]))
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Popover (badge details and voting)
+// ---------------------------------------------------------------------------
+
+let zsPopover = null;
+
+function closePopover({ restoreFocus = false } = {}) {
+  if (!zsPopover) return;
+  const anchor = zsPopover._anchor;
+  zsPopover.remove();
+  zsPopover = null;
+  if (anchor) anchor.setAttribute('aria-expanded', 'false');
+  if (restoreFocus && anchor && anchor.isConnected) anchor.focus();
+}
+
+function togglePopover(badge) {
+  if (zsPopover && zsPopover._anchor === badge) return closePopover();
+  closePopover();
+
+  const spec = badge._zsSpec;
+  const actions = typeof spec.actions === 'function' ? spec.actions() : (spec.actions || []);
+
+  const pop = el('div', {
+    class: `zs-surface zs-popover zs-tone-${spec.tone || 'gray'}`,
+    role: 'dialog',
+    'aria-label': spec.title || spec.label
+  }, [
+    el('div', { class: 'zs-eyebrow', text: 'ZeroSlop' }),
+    el('p', { class: 'zs-title' }, [
+      el('span', { class: 'zs-dot', style: 'color: var(--zs-tone)', 'aria-hidden': 'true' }),
+      spec.title || spec.label
+    ]),
+    spec.desc ? el('p', { class: 'zs-desc', text: spec.desc }) : null,
+    spec.meta ? el('div', { class: 'zs-meta', text: spec.meta }) : null,
+    actions.length ? el('div', { class: 'zs-actions' }, actions.map((a) => el('button', {
+      type: 'button',
+      class: `zs-btn zs-btn-${a.variant || 'secondary'}`,
+      disabled: a.disabled,
+      onclick: (e) => { stop(e); a.onClick?.(e.currentTarget, pop); }
+    }, a.label))) : null,
+    el('div', { class: 'zs-footer' }, [
+      spec.link
+        ? el('a', { href: spec.link.href, target: '_blank', rel: 'noopener', text: spec.link.text })
+        : el('span', { class: 'zs-muted', text: 'Votes improve the registry' }),
+      el('a', { href: ZS_REGISTRY_URL, target: '_blank', rel: 'noopener', text: 'Registry ↗' })
+    ])
+  ]);
+  pop._anchor = badge;
+  ['click', 'mousedown', 'pointerdown'].forEach((t) => pop.addEventListener(t, (e) => e.stopPropagation()));
+
+  document.body.appendChild(pop);
+  const rect = badge.getBoundingClientRect();
+  const popRect = pop.getBoundingClientRect();
+  let top = rect.bottom + 8;
+  if (top + popRect.height > window.innerHeight - 8) top = Math.max(8, rect.top - popRect.height - 8);
+  const left = Math.min(Math.max(8, rect.left), window.innerWidth - popRect.width - 8);
+  pop.style.top = `${top}px`;
+  pop.style.left = `${left}px`;
+
+  badge.setAttribute('aria-expanded', 'true');
+  zsPopover = pop;
+  (pop.querySelector('button:not([disabled])') || pop.querySelector('a'))?.focus({ preventScroll: true });
+}
+
+document.addEventListener('pointerdown', (e) => {
+  if (zsPopover && !zsPopover.contains(e.target) && !zsPopover._anchor.contains(e.target)) closePopover();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (zsPopover) { closePopover({ restoreFocus: true }); return; }
+  document.getElementById('zs-result-card')?.remove();
+});
+window.addEventListener('scroll', (e) => {
+  if (zsPopover && !zsPopover.contains(e.target)) closePopover();
+}, { passive: true, capture: true });
+window.addEventListener('resize', () => closePopover());
+
+// ---------------------------------------------------------------------------
+// Toasts (bottom centre, like X's own) and profile notices
+// ---------------------------------------------------------------------------
+
+function toastHost() {
+  let host = document.getElementById('zs-toasts');
+  if (!host) {
+    host = el('div', { id: 'zs-toasts', class: 'zs-toasts', role: 'region', 'aria-label': 'ZeroSlop notifications', 'aria-live': 'polite' });
+    document.body.appendChild(host);
+  }
+  return host;
+}
+
+function dismissToast(toast) {
+  if (!toast || !toast.isConnected || toast.classList.contains('zs-leaving')) return;
+  toast.classList.add('zs-leaving');
+  setTimeout(() => toast.remove(), 200);
+}
+
+/**
+ * Show a short, non-blocking message.
+ * opts: { title, tone, timeout (ms, 0 = stays until dismissed), actions: [{label, onClick}], key, notice, onDismiss }
+ */
+function zsToast(text, opts = {}) {
+  const host = toastHost();
+  const key = opts.key || `${opts.title || ''}|${text}`;
+  host.querySelectorAll('.zs-toast').forEach((t) => { if (t.dataset.key === key) t.remove(); });
+
+  const toast = el('div', {
+    class: `zs-surface zs-toast zs-tone-${opts.tone || 'blue'}`,
+    'data-notice': opts.notice ? 'true' : null,
+    role: 'status'
+  });
+  toast.dataset.key = key;
+
+  const body = el('div', { class: 'zs-toast-body' }, [
+    opts.title ? el('div', { class: 'zs-toast-title', text: opts.title }) : null,
+    text ? el('div', { class: opts.title ? 'zs-toast-text' : '', text }) : null
+  ]);
+  if (opts.actions?.length) {
+    body.appendChild(el('div', { class: 'zs-toast-actions' }, opts.actions.map((a) => el('button', {
+      type: 'button',
+      class: 'zs-btn zs-btn-ghost',
+      onclick: (e) => { a.onClick?.(e.currentTarget, toast); if (a.dismiss !== false) dismissToast(toast); }
+    }, a.label))));
+  }
+  toast.append(body, el('button', {
+    type: 'button', class: 'zs-icon-btn', 'aria-label': 'Dismiss',
+    onclick: () => { opts.onDismiss?.(); dismissToast(toast); }
+  }, '×'));
+
+  host.appendChild(toast);
+  // Keep the stack short so it never takes over the screen.
+  const live = host.querySelectorAll('.zs-toast:not(.zs-leaving)');
+  if (live.length > 3) dismissToast(live[0]);
+
+  const timeout = opts.timeout ?? 4000;
+  if (timeout > 0) {
+    let timer;
+    const arm = () => { clearTimeout(timer); timer = setTimeout(() => dismissToast(toast), timeout); };
+    toast.addEventListener('mouseenter', () => clearTimeout(timer));
+    toast.addEventListener('focusin', () => clearTimeout(timer));
+    toast.addEventListener('mouseleave', arm);
+    arm();
+  }
+  return toast;
+}
+
+const NOTICE_PRIORITY = { factory: 50, highai: 40, profile: 30, suspicious: 20 };
+const shownNotices = new Map(); // handle -> priority of the notice shown on this page
+
+function noticeDismissKey(handle) {
+  return `zs-notice-dismissed:${normHandle(handle)}`;
+}
+
+/**
+ * Account warnings only appear on that account's own profile, at most once per tab session,
+ * and only the most important one. Scrolling the timeline never triggers them.
+ */
+function showProfileNotice(kind, handle, { title, text, actions = [] }) {
+  if (!zsSettings.profileAlerts || !isCurrentProfile(handle)) return;
+  try { if (sessionStorage.getItem(noticeDismissKey(handle))) return; } catch (e) {}
+  const priority = NOTICE_PRIORITY[kind] || 0;
+  if ((shownNotices.get(normHandle(handle)) || 0) >= priority) return;
+  shownNotices.set(normHandle(handle), priority);
+
+  const remember = () => { try { sessionStorage.setItem(noticeDismissKey(handle), '1'); } catch (e) {} };
+  zsToast(text, {
+    title,
+    tone: kind === 'profile' ? 'red' : (BADGE_KINDS[kind]?.tone || 'red'),
+    key: `notice:${normHandle(handle)}`,
+    notice: true,
+    timeout: 10000,
+    onDismiss: remember,
+    actions
+  });
+}
+
+function clearPageUi() {
+  closePopover();
+  document.querySelectorAll('.zs-toast[data-notice]').forEach((n) => n.remove());
+  document.querySelectorAll('.zs-header-badge').forEach((b) => b.remove());
+  shownNotices.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Account status (registry lookups answered by the background script)
+// ---------------------------------------------------------------------------
+
+function applyAccountStatus(kind, handle, extra = {}) {
+  if (!handle) return;
+
+  tweetsByHandle(handle).forEach((article) => {
+    let spec = { kind, actions: () => accountVoteActions(handle) };
+    if (kind === 'factory') spec.link = { href: mapUrl(handle), text: 'View network map' };
+    if (kind === 'suspicious') {
+      spec = { kind, link: extra.reasonTweetId ? { href: statusUrl(extra.reasonTweetId), text: 'See what it amplified' } : null };
+    }
+    setBadge(article, spec);
+    if (kind === 'factory') handleAutoAction(article, 100, 'Slop factory');
+  });
+
+  if (kind !== 'suspicious') setProfileHeaderBadge(kind, handle);
+
+  const at = `@${normHandle(handle)}`;
+  if (kind === 'factory') {
+    showProfileNotice('factory', handle, {
+      title: `${at} is a known slop factory`,
+      text: 'The community flagged this account for mass-producing engagement bait.',
+      actions: [{ label: 'View network map', onClick: () => window.open(mapUrl(handle), '_blank', 'noopener') }]
+    });
+  } else if (kind === 'highai') {
+    showProfileNotice('highai', handle, {
+      title: `${at} posts a lot of AI content`,
+      text: 'The community flagged this account for high AI usage.'
+    });
+  } else if (kind === 'suspicious') {
+    showProfileNotice('suspicious', handle, {
+      title: `${at} may be an amplifier bot`,
+      text: 'It recently retweeted or quoted a confirmed slop factory.',
+      actions: extra.reasonTweetId
+        ? [{ label: 'See the post', onClick: () => window.open(statusUrl(extra.reasonTweetId), '_blank', 'noopener') }]
+        : []
+    });
+  }
+  // Verified humans only get a quiet green badge. Good news doesn't need an alert.
+}
+
+function showProfileSlopWarning(handle, highSlopCount, avgScore) {
+  showProfileNotice('profile', handle, {
+    title: `${highSlopCount} AI-heavy posts from @${normHandle(handle)}`,
+    text: `Scanned posts from this account average ${avgScore}% AI.`,
+    actions: [{
+      label: 'Report as slop factory',
+      onClick: () => {
+        const info = extractProfileInfo(null);
+        if (info?.author?.handle) {
+          chrome.runtime.sendMessage({ action: 'manualReportAccount', author: info.author });
+          zsToast(`Thanks. ${info.author.handle} was reported as a slop factory.`, { tone: 'green' });
+        }
+      }
+    }]
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Messages from the background script
+// ---------------------------------------------------------------------------
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  switch (request.action) {
+    case 'getTweetText':
+      sendResponse(extractTweetInfo(lastRightClickedElement));
+      break;
+    case 'getThreadText':
+      sendResponse(extractThreadInfo(lastRightClickedElement));
+      break;
+    case 'getProfileText':
+      sendResponse(extractProfileInfo(lastRightClickedElement));
+      break;
+    case 'showLoader':
+      showResultCard({ state: 'loading' });
+      break;
+    case 'showResult':
+      handleResult(request);
+      break;
+    case 'adminShowBadge':
+      handleAdminBadge(request.data);
+      break;
+    case 'showError':
+      showResultCard({ state: 'error', message: request.message });
+      break;
+    case 'showProfileWarning':
+      showProfileSlopWarning(request.handle, request.highSlopCount, request.avgScore);
+      break;
+    case 'showSuspiciousWarning':
+      applyAccountStatus('suspicious', request.handle, { reasonTweetId: request.reasonTweetId });
+      break;
+    case 'showSlopFactoryWarning':
+      applyAccountStatus('factory', request.handle);
+      break;
+    case 'showHighAIWarning':
+      applyAccountStatus('highai', request.handle);
+      break;
+    case 'showOrganicSuccess':
+      applyAccountStatus('organic', request.handle);
+      break;
+  }
+  return true;
+});
+
+function handleResult(request) {
+  const data = request.data || {};
+  const hasScore = data.fakePercentage !== undefined && data.fakePercentage !== null;
+  const pct = Math.round(Number(data.fakePercentage) || 0);
+  const message = data.feedback_message || '';
+  const isThreadScan = message.startsWith('Thread Analysis');
+
+  if (!request.isAutoScan) {
+    if (!hasScore) {
+      // Confirmation only, e.g. "Reported to ZeroSlop Registry".
+      document.getElementById('zs-result-card')?.remove();
+      zsToast(message || 'Done', { tone: 'green' });
       return;
     }
+    const scope = isThreadScan ? (request.tweetId ? 'thread' : 'profile') : (request.tweetId ? 'tweet' : 'selection');
+    currentOverlayInfo = scope === 'profile' ? extractProfileInfo(lastRightClickedElement)
+      : scope === 'thread' ? extractThreadInfo(lastRightClickedElement)
+      : extractTweetInfo(lastRightClickedElement);
+    showResultCard({ state: 'result', pct, words: data.textWords, scope, info: currentOverlayInfo });
+    // A thread, profile or text-selection score doesn't belong on a single post.
+    if (scope !== 'tweet') return;
+  }
 
-    // Check if author is a known slop factory
-    if (author?.handle) {
-      chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: author.handle }, (result) => {
-        const isSlopFactory = result && (result.shield_type === 'red' || result.shield_type === 'blue');
-        
-        if (isSlopFactory) {
-          // Known slop factory - show slop factory badge with different behavior
-          console.log(`ZeroSlop Admin: ${author.handle} is known slop factory (shield: ${result.shield_type}), showing factory badge`);
-          injectHumanBadge(container, tweetId, author, percentage, true);
-        } else if (percentage <= 15) {
-          // Not a known factory and low AI score - show human badge
-          console.log(`ZeroSlop Admin: Injecting human badge for ${tweetId}`);
-          injectHumanBadge(container, tweetId, author, percentage, false);
+  const container = request.tweetId ? getTweetContainerByTweetId(request.tweetId) : null;
+  injectScoreBadge(container, pct, {
+    upvotes: data.upvotes || 0,
+    downvotes: data.downvotes || 0,
+    tweetId: request.tweetId,
+    // Automatic lookups only badge posts worth flagging. A post you scanned yourself always gets one.
+    force: !request.isAutoScan
+  });
+}
+
+function injectScoreBadge(container, pct, { upvotes = 0, downvotes = 0, tweetId, force = false } = {}) {
+  if (!container) return;
+  if (!force && pct <= ZS_AI_FLAG_THRESHOLD) return;
+  if (!force && downvotes > upvotes + 2) return; // The community disagrees with this score.
+
+  const id = tweetId || extractTweetInfo(container).tweetId;
+  const total = upvotes + downvotes;
+  setBadge(container, {
+    kind: 'score',
+    replace: force,
+    tone: scoreTone(pct),
+    label: `${pct}% AI`,
+    title: `${pct}% AI · ${scoreVerdict(pct)}`,
+    desc: 'ZeroGPT’s estimate of how much of this post was machine-written.',
+    meta: total ? `Community: ${upvotes} agree · ${downvotes} disagree` : 'No community votes yet',
+    actions: () => voteActions(`tweet:${id}`, (voteType) => {
+      if (id && !String(id).startsWith('local-')) chrome.runtime.sendMessage({ action: 'voteSlop', voteType, tweetId: id });
+    })
+  });
+  handleAutoAction(container, pct, `${pct}% AI`);
+}
+
+// Developer data-collection mode: label posts so they can be added to the training dataset.
+function handleAdminBadge({ percentage, tweetId, author }) {
+  const container = getTweetContainerByTweetId(tweetId);
+  if (!container) return;
+
+  const text = () => container.querySelector('[data-testid="tweetText"]')?.innerText || '';
+  const done = (pop, message) => pop.querySelector('.zs-actions').replaceChildren(el('div', { class: 'zs-muted', role: 'status', text: message }));
+  const skip = { label: 'Skip', onClick: () => { closePopover(); container.querySelector('.zs-badge[data-kind="admin"]')?.remove(); } };
+
+  const showBadge = (isSlopFactory) => {
+    if (isSlopFactory) {
+      setBadge(container, {
+        kind: 'admin', priority: 60, tone: 'red', label: `Factory post · ${percentage}%`, title: 'Post from a known slop factory',
+        desc: 'Add this post to the slop registry?',
+        actions: [{ label: 'Add to registry', variant: 'primary', onClick: (btn, pop) => {
+          chrome.runtime.sendMessage({ action: 'manualReport', tweetId, text: text(), aiScore: percentage, author, slopType: 'type_slop_factory', shieldType: 'shield-red' });
+          done(pop, 'Added to the slop registry.');
+        } }, skip]
+      });
+    } else if (percentage <= ZS_AI_FLAG_THRESHOLD) {
+      setBadge(container, {
+        kind: 'admin', priority: 60, tone: 'green', label: `Human · ${percentage}%`, title: 'Likely human-written',
+        desc: 'Add this post to the human dataset?',
+        actions: [{ label: 'Add to dataset', variant: 'primary', onClick: (btn, pop) => {
+          chrome.runtime.sendMessage({ action: 'voteHuman', voteType: 'up', tweetId, text: text(), author });
+          done(pop, 'Added to the human dataset.');
+        } }, skip]
+      });
+    } else {
+      setBadge(container, {
+        kind: 'admin', priority: 60, tone: scoreTone(percentage), label: `Likely AI · ${percentage}%`, title: 'Likely AI-generated',
+        desc: 'This post scored above the human threshold.'
+      });
+    }
+  };
+
+  if (author?.handle) {
+    chrome.runtime.sendMessage({ action: 'checkSlopAccount', handle: author.handle }, (result) => {
+      showBadge(!!result && (result.shield_type === 'red' || result.shield_type === 'blue'));
+    });
+  } else {
+    showBadge(false);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hunter Vision: underline engagement-bait phrases in place
+// ---------------------------------------------------------------------------
+
+function findRuleMatches(text) {
+  const ranges = [];
+  for (const rule of UNIFIED_SLOP_RULES) {
+    const flags = rule.regex.flags.includes('g') ? rule.regex.flags : `${rule.regex.flags}g`;
+    const re = new RegExp(rule.regex.source, flags);
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      if (!m[0]) { re.lastIndex++; continue; }
+      ranges.push({ start: m.index, end: m.index + m[0].length, rule });
+    }
+  }
+  // Prefer short, specific hooks ("7 prompts") over long clause matches, then stronger rules.
+  ranges.sort((a, b) => (a.end - a.start) - (b.end - b.start) || b.rule.points - a.rule.points);
+  const kept = [];
+  for (const r of ranges) {
+    if (!kept.some((k) => r.start < k.end && k.start < r.end)) kept.push(r);
+  }
+  return kept.sort((a, b) => a.start - b.start);
+}
+
+function highlightSlopMarkers(article) {
+  if (!zsSettings.hunterVision || !article) return;
+  const root = article.querySelector('[data-testid="tweetText"]');
+  if (!root || root.dataset.zsHighlighted) return;
+  root.dataset.zsHighlighted = 'true';
+
+  // Walk text nodes so links, mentions and emoji images are left intact.
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+
+  for (const node of nodes) {
+    const text = node.nodeValue;
+    const matches = findRuleMatches(text);
+    if (!matches.length) continue;
+    const frag = document.createDocumentFragment();
+    let pos = 0;
+    for (const { start, end, rule } of matches) {
+      if (start > pos) frag.append(text.slice(pos, start));
+      frag.append(el('mark', {
+        class: `zs-mark ${rule.points >= 5 ? 'zs-mark-hard' : 'zs-mark-soft'}`,
+        title: `ZeroSlop · ${rule.label}: ${rule.description}`
+      }, text.slice(start, end)));
+      pos = end;
+    }
+    if (pos < text.length) frag.append(text.slice(pos));
+    node.replaceWith(frag);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Blur / hide actions (always reversible)
+// ---------------------------------------------------------------------------
+
+function handleAutoAction(container, percentage, reason) {
+  if (!container) return;
+  const action = zsSettings.slopAction || 'blur';
+  const threshold = zsSettings.hideThreshold ?? 85;
+  if (action === 'none' || percentage < threshold) return;
+  if (container.dataset.zsActioned || container.dataset.zsRevealed) return;
+  container.dataset.zsActioned = action;
+  if (action === 'zap') zapPost(container, reason);
+  else veilPost(container, reason);
+}
+
+function veilPost(container, reason) {
+  const content = container.querySelector('[data-testid="tweetText"]')?.parentElement;
+  if (!content || content.classList.contains('zs-veiled')) return;
+  content.classList.add('zs-veiled');
+  const reveal = el('button', {
+    type: 'button',
+    class: 'zs-reveal',
+    'aria-label': `Hidden by ZeroSlop: ${reason}. Show post`
+  }, [el('span', { text: `Hidden · ${reason} · Show` })]);
+  reveal.addEventListener('mousedown', (e) => e.stopPropagation());
+  reveal.addEventListener('click', (e) => {
+    stop(e);
+    content.classList.remove('zs-veiled');
+    reveal.remove();
+    container.dataset.zsRevealed = 'true';
+  });
+  content.appendChild(reveal);
+}
+
+function zapPost(container, reason) {
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  container.classList.add('zs-zapping');
+  setTimeout(() => {
+    container.classList.remove('zs-zapping');
+    container.classList.add('zs-zapped');
+    const show = el('button', { type: 'button', text: 'Show' });
+    const note = el('div', { class: 'zs-zap-note', role: 'note' }, [
+      el('span', { text: `Post hidden by ZeroSlop · ${reason}` }),
+      show
+    ]);
+    note.addEventListener('click', (e) => e.stopPropagation());
+    show.addEventListener('click', (e) => {
+      stop(e);
+      container.classList.remove('zs-zapped');
+      container.dataset.zsRevealed = 'true';
+      note.remove();
+    });
+    container.before(note);
+  }, reduceMotion ? 0 : 600);
+}
+
+// ---------------------------------------------------------------------------
+// Observers: scan posts as they scroll into view
+// ---------------------------------------------------------------------------
+
+function scanArticle(container) {
+  highlightSlopMarkers(container);
+  const info = extractTweetInfo(container);
+
+  // Layer 3: Smart Slop Guard (on-device model)
+  if (zsSettings.autoHumanDetection && info.text && info.text.length > 20) {
+    const prediction = ZeroSlopClassifier.predict(info.text);
+    if (prediction && (prediction.label === 'slop-factory' || prediction.label === 'ai-generated') && prediction.probability > 0.70) {
+      setBadge(container, {
+        kind: 'smart',
+        meta: `Model confidence: ${Math.round(prediction.probability * 100)}%`
+      });
+    }
+  }
+
+  if (!info.tweetId || info.tweetId.startsWith('local-')) return;
+  container.setAttribute('data-zerogpt-tweet-id', info.tweetId);
+
+  // Layer 1: Community Shield (registry lookup, on by default)
+  if (zsSettings.communityShield !== false) {
+    chrome.runtime.sendMessage({ action: 'checkRegistry', tweetId: info.tweetId });
+  }
+
+  // Layer 4: ZeroGPT auto-scan (paid, opt-in)
+  if (zsSettings.autoScan || zsSettings.adminOrganicCollection) {
+    chrome.runtime.sendMessage({ action: 'autoScanTweet', text: info.text, tweetId: info.tweetId, author: info.author });
+  }
+
+  if (info.author?.handle) {
+    chrome.runtime.sendMessage({ action: 'checkSuspicious', handle: info.author.handle });
+    chrome.runtime.sendMessage({ action: 'checkSlopAccount', handle: info.author.handle });
+  }
+}
+
+function scanUserCell(container) {
+  const handleEl = container.querySelector('span:nth-child(2)');
+  if (handleEl && handleEl.innerText.startsWith('@')) {
+    chrome.runtime.sendMessage({ action: 'checkSlopAccount', handle: handleEl.innerText });
+    chrome.runtime.sendMessage({ action: 'checkSuspicious', handle: handleEl.innerText });
+  }
+}
+
+async function initObservers() {
+  if (window.zerogptObserver) window.zerogptObserver.disconnect();
+
+  await zsSettingsReady;
+  await ZeroSlopClassifier.load();
+
+  const checkContext = () => {
+    syncTheme();
+    const handle = currentProfileHandle();
+    const parts = window.location.pathname.split('/').filter(Boolean);
+    if (handle && parts.length === 1) {
+      chrome.runtime.sendMessage({ action: 'checkProfileSlop', handle: `@${handle}` });
+      chrome.runtime.sendMessage({ action: 'checkSuspicious', handle: `@${handle}` });
+      chrome.runtime.sendMessage({ action: 'checkSlopAccount', handle: `@${handle}` });
+    }
+    const path = window.location.pathname;
+    if (path.includes('/following') || path.includes('/followers') || path.includes('/verified_followers')) {
+      injectListAuditorButton();
+    }
+  };
+
+  checkContext();
+
+  let lastPath = window.location.pathname;
+  const navObserver = new MutationObserver(() => {
+    if (window.location.pathname !== lastPath) {
+      lastPath = window.location.pathname;
+      clearPageUi();
+      document.getElementById('zerogpt-list-auditor')?.remove();
+      checkContext();
+    }
+  });
+  navObserver.observe(document.head, { childList: true, subtree: true });
+
+  // Re-check the theme when X switches between light, dim and lights out.
+  new MutationObserver(syncTheme).observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
+
+  window.zerogptObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      const container = entry.target;
+      if (container.dataset.zerogptChecked) return;
+      container.dataset.zerogptChecked = 'true';
+      if (container.tagName === 'ARTICLE') scanArticle(container);
+      else if (container.getAttribute('data-testid') === 'UserCell') scanUserCell(container);
+    });
+  }, { threshold: 0.1 });
+
+  const mutationObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType !== 1) return;
+        if (node.tagName === 'ARTICLE' || node.getAttribute('data-testid') === 'UserCell') {
+          window.zerogptObserver.observe(node);
         } else {
-          // High AI score - show AI badge
-          console.log(`ZeroSlop Admin: Injecting AI badge for ${tweetId}`);
-          injectLikelyAIBadge(container, tweetId, author, percentage);
+          node.querySelectorAll('article, [data-testid="UserCell"]').forEach((t) => window.zerogptObserver.observe(t));
         }
       });
-    } else if (percentage <= 15) {
-      // No author info but low AI score - show human badge
-      console.log(`ZeroSlop Admin: Injecting human badge for ${tweetId} (no author)`);
-      injectHumanBadge(container, tweetId, author, percentage, false);
-    } else {
-      // High AI score - show AI badge
-      console.log(`ZeroSlop Admin: Injecting AI badge for ${tweetId}`);
-      injectLikelyAIBadge(container, tweetId, author, percentage);
+    });
+  });
+  mutationObserver.observe(document.body, { childList: true, subtree: true });
+
+  const retweetObserver = new MutationObserver(() => {
+    const path = window.location.pathname;
+    if (!path.includes('/retweets') && !path.includes('/quotes')) return;
+    const match = path.match(/\/status\/(\d+)/);
+    if (!match) return;
+    const tweetId = match[1];
+    chrome.runtime.sendMessage({ action: 'checkRegistry', tweetId }, (data) => {
+      if (!data || data.ai_score <= ZS_AI_FLAG_THRESHOLD) return;
+      document.querySelectorAll('[data-testid="UserCell"]').forEach((cell) => {
+        const handleEl = cell.querySelector('span:nth-child(2)');
+        if (handleEl && handleEl.innerText.startsWith('@')) {
+          chrome.runtime.sendMessage({
+            action: 'reportSuspicious',
+            handle: handleEl.innerText,
+            name: cell.querySelector('span:nth-child(1)')?.innerText,
+            pfp: cell.querySelector('img')?.src,
+            tweetId,
+            factoryHandle: data.author_handle
+          });
+        }
+      });
+    });
+  });
+  retweetObserver.observe(document.body, { childList: true, subtree: true });
+
+  document.querySelectorAll('article, [data-testid="UserCell"]').forEach((node) => window.zerogptObserver.observe(node));
+}
+
+function injectListAuditorButton() {
+  if (document.getElementById('zerogpt-list-auditor')) return;
+  const column = document.querySelector('[data-testid="primaryColumn"]');
+  if (!column) return;
+
+  const btn = el('button', { type: 'button', id: 'zerogpt-list-auditor', class: 'zs-audit-btn' }, '🕵️ Audit this list in the ZeroSlop registry');
+  btn.addEventListener('click', () => {
+    const handles = Array.from(document.querySelectorAll('[data-testid="UserCell"] span:nth-child(2)'))
+      .map((node) => node.innerText)
+      .filter((h) => h.startsWith('@'));
+    if (handles.length === 0) {
+      zsToast('No accounts loaded yet. Scroll down a little, then try again.', { tone: 'amber' });
+      return;
     }
-  } else if (request.action === "showError") {
-    showOverlay(request.message, "error");
-  } else if (request.action === "showProfileWarning") {
-    injectProfileBanner(request.handle, request.highSlopCount, request.avgScore);
-  } else if (request.action === "showSuspiciousWarning") {
-    injectSuspiciousBanner(request.handle, request.reasonTweetId);
-    // Also find all visible tweets by this handle and add badge
-    const articles = document.querySelectorAll('article');
-    articles.forEach(article => {
-      const info = extractTweetInfo(article);
-      if (info.author?.handle === request.handle) {
-        injectSuspiciousBadge(article, request.handle);
-      }
-    });
-  } else if (request.action === "showSlopFactoryWarning") {
-    injectSlopFactoryBanner(request.handle);
-    // Also inject badge in header if on profile
-    injectSlopFactoryHeaderBadge(request.handle);
-    const articles = document.querySelectorAll('article');
-    articles.forEach(article => {
-      const info = extractTweetInfo(article);
-      if (info.author?.handle === request.handle) {
-        injectSlopFactoryBadge(article, request.handle);
-      }
-    });
-  } else if (request.action === "showHighAIWarning") {
-    injectHighAIBanner(request.handle);
-    injectHighAIHeaderBadge(request.handle);
-    const articles = document.querySelectorAll('article');
-    articles.forEach(article => {
-      const info = extractTweetInfo(article);
-      if (info.author?.handle === request.handle) {
-        injectHighAIBadge(article, request.handle);
-      }
-    });
-  } else if (request.action === "showOrganicSuccess") {
-    injectOrganicBanner(request.handle);
-    injectOrganicHeaderBadge(request.handle);
-    const articles = document.querySelectorAll('article');
-    articles.forEach(article => {
-      const info = extractTweetInfo(article);
-      if (info.author?.handle === request.handle) {
-        injectOrganicBadge(article, request.handle);
-      }
-    });
-  }
-  return true; 
-});
-
-function injectSlopFactoryBanner(handle) {
-  const existing = document.getElementById('zerogpt-slopfactory-banner');
-  if (existing) existing.remove();
-
-  const banner = document.createElement('div');
-  banner.id = 'zerogpt-slopfactory-banner';
-  banner.style.cssText = `
-    background: #000;
-    color: #fff;
-    padding: 12px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 14px;
-    position: sticky;
-    top: 0;
-    z-index: 9999;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 15px;
-    border-bottom: 2px solid #f4212e;
-  `;
-  banner.innerHTML = `
-    <span>🚩 RED SHIELD: SLOP FACTORY DETECTED (${handle})</span>
-    <a href="https://woodrock.github.io/zero-slop?search=${handle.replace('@', '')}" target="_blank" style="color: #1d9bf0; text-decoration: underline; font-size: 12px;">View Network Map</a>
-    <button id="close-slopfactory-banner" style="background: #f4212e; border: none; color: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Dismiss</button>
-  `;
-
-  document.body.prepend(banner);
-  banner.querySelector('#close-slopfactory-banner').onclick = () => banner.remove();
-}
-
-function injectSlopFactoryHeaderBadge(handle) {
-  // Try to find the profile header name
-  const userNameHeader = document.querySelector('[data-testid="UserName"]');
-  if (!userNameHeader || userNameHeader.querySelector('.zerogpt-slopfactory-header-badge')) return;
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-slopfactory-header-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 12px;
-    margin-top: 4px;
-    border-radius: 9999px;
-    font-size: 12px;
-    font-weight: bold;
-    color: #fff;
-    background-color: #000;
-    border: 2px solid #f4212e;
-    cursor: help;
-  `;
-  badge.innerHTML = `🚩 RED SHIELD: FACTORY <span class="v-up" style="cursor:pointer;margin-left:8px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:4px;">👎</span>`;
-  
-  badge.querySelector('.v-up').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
-    badge.querySelector('.v-up').innerText = '✅';
-  };
-  badge.querySelector('.v-down').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
-    badge.querySelector('.v-down').innerText = '❌';
-  };
-
-  userNameHeader.appendChild(badge);
-}
-
-function injectSlopFactoryBadge(container, handle) {
-  if (!container || container.querySelector('.zerogpt-slopfactory-badge')) return;
-  
-  // Clean up any local "Likely Human" badges if we've now verified this as a factory
-  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
-  if (localBadge) localBadge.remove();
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-slopfactory-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    margin-left: 8px;
-    border-radius: 9999px;
-    font-size: 10px;
-    font-weight: bold;
-    color: #fff;
-    background-color: #000;
-    border: 1px solid #f4212e;
-    vertical-align: middle;
-    line-height: 1;
-    height: 16px;
-    cursor: help;
-  `;
-  badge.innerHTML = `🚩 RED SHIELD: FACTORY <span class="v-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
-  badge.title = 'Confirmed Slop Factory. Community verification in progress.';
-
-  badge.querySelector('.v-up').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
-    badge.querySelector('.v-up').innerText = '✅';
-  };
-  badge.querySelector('.v-down').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
-    badge.querySelector('.v-down').innerText = '❌';
-  };
-
-  const timeElement = container.querySelector('time');
-  if (timeElement && timeElement.parentNode) {
-    timeElement.parentNode.appendChild(badge);
-  }
-
-  // Handle Auto-Action for Slop Factories
-  handleAutoAction(container, 100);
-}
-
-function injectHighAIBanner(handle) {
-  const existing = document.getElementById('zerogpt-highai-banner');
-  if (existing) existing.remove();
-
-  const banner = document.createElement('div');
-  banner.id = 'zerogpt-highai-banner';
-  banner.style.cssText = `
-    background: #1d9bf0;
-    color: #fff;
-    padding: 12px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 14px;
-    position: sticky;
-    top: 0;
-    z-index: 9999;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 15px;
-  `;
-  banner.innerHTML = `
-    <span>🔵 BLUE SHIELD: HIGH AI USAGE (${handle})</span>
-    <button id="close-highai-banner" style="background: rgba(255,255,255,0.2); border: none; color: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Dismiss</button>
-  `;
-
-  document.body.prepend(banner);
-  banner.querySelector('#close-highai-banner').onclick = () => banner.remove();
-}
-
-function injectHighAIHeaderBadge(handle) {
-  const userNameHeader = document.querySelector('[data-testid="UserName"]');
-  if (!userNameHeader || userNameHeader.querySelector('.zerogpt-highai-header-badge')) return;
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-highai-header-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 12px;
-    margin-top: 4px;
-    border-radius: 9999px;
-    font-size: 12px;
-    font-weight: bold;
-    color: #fff;
-    background-color: #000;
-    border: 2px solid #1d9bf0;
-    cursor: help;
-  `;
-  badge.innerHTML = `🔵 BLUE SHIELD: HIGH AI <span class="v-up" style="cursor:pointer;margin-left:8px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:4px;">👎</span>`;
-  
-  badge.querySelector('.v-up').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
-    badge.querySelector('.v-up').innerText = '✅';
-  };
-  badge.querySelector('.v-down').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
-    badge.querySelector('.v-down').innerText = '❌';
-  };
-
-  userNameHeader.appendChild(badge);
-}
-
-function injectHighAIBadge(container, handle) {
-  if (!container || container.querySelector('.zerogpt-highai-badge')) return;
-
-  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
-  if (localBadge) localBadge.remove();
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-highai-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    margin-left: 8px;
-    border-radius: 9999px;
-    font-size: 10px;
-    font-weight: bold;
-    color: #fff;
-    background-color: #000;
-    border: 1px solid #1d9bf0;
-    vertical-align: middle;
-    line-height: 1;
-    height: 16px;
-    cursor: help;
-  `;
-  badge.innerHTML = `🔵 BLUE SHIELD: HIGH AI <span class="v-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
-
-  badge.querySelector('.v-up').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
-    badge.querySelector('.v-up').innerText = '✅';
-  };
-  badge.querySelector('.v-down').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
-    badge.querySelector('.v-down').innerText = '❌';
-  };
-
-  const timeElement = container.querySelector('time');
-  if (timeElement && timeElement.parentNode) {
-    timeElement.parentNode.appendChild(badge);
-  }
-}
-
-function injectOrganicBanner(handle) {
-  const existing = document.getElementById('zerogpt-organic-banner');
-  if (existing) existing.remove();
-
-  const banner = document.createElement('div');
-  banner.id = 'zerogpt-organic-banner';
-  banner.style.cssText = `
-    background: #00ba7c;
-    color: #fff;
-    padding: 12px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 14px;
-    position: sticky;
-    top: 0;
-    z-index: 9999;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 15px;
-  `;
-  banner.innerHTML = `
-    <span>🌿 GREEN SHIELD: VERIFIED HUMAN (${handle})</span>
-    <button id="close-organic-banner" style="background: rgba(255,255,255,0.2); border: none; color: #fff; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Dismiss</button>
-  `;
-
-  document.body.prepend(banner);
-  banner.querySelector('#close-organic-banner').onclick = () => banner.remove();
-}
-
-function injectOrganicHeaderBadge(handle) {
-  const userNameHeader = document.querySelector('[data-testid="UserName"]');
-  if (!userNameHeader || userNameHeader.querySelector('.zerogpt-organic-header-badge')) return;
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-organic-header-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 12px;
-    margin-top: 4px;
-    border-radius: 9999px;
-    font-size: 12px;
-    font-weight: bold;
-    color: #fff;
-    background-color: #000;
-    border: 2px solid #00ba7c;
-    cursor: help;
-  `;
-  badge.innerHTML = `🌿 GREEN SHIELD: HUMAN <span class="v-up" style="cursor:pointer;margin-left:8px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:4px;">👎</span>`;
-  
-  badge.querySelector('.v-up').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
-    badge.querySelector('.v-up').innerText = '✅';
-  };
-  badge.querySelector('.v-down').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
-    badge.querySelector('.v-down').innerText = '❌';
-  };
-
-  userNameHeader.appendChild(badge);
-}
-
-function injectOrganicBadge(container, handle) {
-  if (!container || container.querySelector('.zerogpt-organic-badge')) return;
-
-  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
-  if (localBadge) localBadge.remove();
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-organic-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    margin-left: 8px;
-    border-radius: 9999px;
-    font-size: 10px;
-    font-weight: bold;
-    color: #fff;
-    background-color: #000;
-    border: 1px solid #00ba7c;
-    vertical-align: middle;
-    line-height: 1;
-    height: 16px;
-    cursor: help;
-  `;
-  badge.innerHTML = `🌿 GREEN SHIELD: HUMAN <span class="v-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="v-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
-
-  badge.querySelector('.v-up').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "up" });
-    badge.querySelector('.v-up').innerText = '✅';
-  };
-  badge.querySelector('.v-down').onclick = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    chrome.runtime.sendMessage({ action: "voteAccount", handle: handle, voteType: "down" });
-    badge.querySelector('.v-down').innerText = '❌';
-  };
-
-  const timeElement = container.querySelector('time');
-  if (timeElement && timeElement.parentNode) {
-    timeElement.parentNode.appendChild(badge);
-  }
-}
-
-function injectSuspiciousBanner(handle, reasonTweetId) {
-  const existing = document.getElementById('zerogpt-suspicious-banner');
-  if (existing) existing.remove();
-
-  const banner = document.createElement('div');
-  banner.id = 'zerogpt-suspicious-banner';
-  banner.style.cssText = `
-    background: #ffd700;
-    color: #000;
-    padding: 12px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 14px;
-    position: sticky;
-    top: 0;
-    z-index: 9999;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    border-bottom: 2px solid rgba(0,0,0,0.1);
-  `;
-  banner.innerHTML = `
-    <span>🕵️ POTENTIAL BOT: ${handle} recently retweeted a confirmed AI-slop tweet.</span>
-    <a href="https://x.com/i/status/${reasonTweetId}" target="_blank" style="color: #000; text-decoration: underline; font-size: 12px;">View Slop</a>
-    <button id="close-suspicious-banner" style="background: rgba(0,0,0,0.1); border: none; color: #000; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px;">Dismiss</button>
-  `;
-
-  document.body.prepend(banner);
-  banner.querySelector('#close-suspicious-banner').onclick = () => banner.remove();
-}
-
-function injectSuspiciousBadge(container, handle) {
-  if (!container || container.querySelector('.zerogpt-suspicious-badge')) return;
-
-  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
-  if (localBadge) localBadge.remove();
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-suspicious-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    margin-left: 8px;
-    border-radius: 9999px;
-    font-size: 10px;
-    font-weight: bold;
-    color: #000;
-    background-color: #ffd700;
-    vertical-align: middle;
-    line-height: 1;
-    height: 16px;
-    cursor: help;
-  `;
-  badge.innerText = '⚠️ ORANGE SHIELD: SUSPICIOUS';
-  badge.title = 'This account has recently interacted with AI-slop factories.';
-
-  const timeElement = container.querySelector('time');
-  if (timeElement && timeElement.parentNode) {
-    timeElement.parentNode.appendChild(badge);
-  }
-}
-
-function injectProfileBanner(handle, highSlopCount, avgScore) {
-  const existing = document.getElementById('zerogpt-profile-banner');
-  if (existing) existing.remove();
-
-  const banner = document.createElement('div');
-  banner.id = 'zerogpt-profile-banner';
-  banner.style.cssText = `
-    background: #f4212e;
-    color: white;
-    padding: 12px;
-    text-align: center;
-    font-weight: bold;
-    font-size: 14px;
-    position: sticky;
-    top: 0;
-    z-index: 9999;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-  `;
-  banner.innerHTML = `
-    <span>⚠️ SLOP WARNING: ${handle} has ${highSlopCount} high-slop detections (Avg: ${avgScore}% AI)</span>
-    <button id="verify-slop-factory" style="background: white; border: none; color: #f4212e; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px; font-weight: bold;">Verify as Slop Factory</button>
-    <button id="close-slop-banner" style="background: rgba(255,255,255,0.2); border: none; color: white; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 12px;">Dismiss</button>
-  `;
-
-  document.body.prepend(banner);
-  banner.querySelector('#close-slop-banner').onclick = () => banner.remove();
-  banner.querySelector('#verify-slop-factory').onclick = () => {
-    const info = extractProfileInfo(null);
-    if (info && info.author && info.author.handle) {
-      chrome.runtime.sendMessage({ action: "manualReportAccount", author: info.author });
-      banner.querySelector('#verify-slop-factory').innerText = '✅ Reported';
-      banner.querySelector('#verify-slop-factory').disabled = true;
-    }
-  };
+    window.open(`${ZS_REGISTRY_URL}?audit=${encodeURIComponent(handles.join(','))}`, '_blank', 'noopener');
+  });
+  column.prepend(btn);
 }
 
 function getTweetContainer(element) {
@@ -730,425 +1219,6 @@ function extractProfileInfo(element) {
   };
 }
 
-function injectBadge(tweetIdOrContainer, percentage, upvotes = 0, downvotes = 0) {
-  let container;
-  let tweetIdString = "";
-
-  if (typeof tweetIdOrContainer === 'string') {
-    tweetIdString = tweetIdOrContainer;
-    container = document.querySelector(`article a[href*="/status/${tweetIdOrContainer}"]`)?.closest('article') ||
-                document.querySelector(`[data-zerogpt-id="${tweetIdOrContainer}"]`);
-  } else {
-    container = tweetIdOrContainer;
-    const info = extractTweetInfo(container);
-    tweetIdString = info.tweetId;
-  }
-
-  if (!container || container.querySelector('.zerogpt-badge')) return;
-
-  const localBadge = container.querySelector('.zerogpt-likely-human-badge');
-  if (localBadge) localBadge.remove();
-
-  if (downvotes > upvotes + 2) {
-    return;
-  }
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-badge';
-  
-  let color = '#17a2b8';
-  if (percentage > 70) color = '#f4212e';
-  else if (percentage < 30) color = '#00ba7c';
-  else color = '#ffd700';
-
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    margin-left: 8px;
-    border-radius: 9999px;
-    font-size: 11px;
-    font-weight: bold;
-    color: white;
-    background-color: ${color};
-    vertical-align: middle;
-    line-height: 1;
-    height: 18px;
-    cursor: help;
-    border: 1px solid rgba(255,255,255,0.2);
-  `;
-  badge.innerHTML = `AI: ${percentage}% [↑${upvotes} | ↓${downvotes}] <span class="vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
-  badge.title = 'ZeroSlop Registry Score';
-
-  badge.querySelector('.vote-up').addEventListener('click', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (tweetIdString) {
-      chrome.runtime.sendMessage({ action: "voteSlop", voteType: "up", tweetId: tweetIdString });
-      badge.querySelector('.vote-up').innerText = '✅';
-    }
-  });
-
-  badge.querySelector('.vote-down').addEventListener('click', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (tweetIdString) {
-      chrome.runtime.sendMessage({ action: "voteSlop", voteType: "down", tweetId: tweetIdString });
-      badge.querySelector('.vote-down').innerText = '❌';
-    }
-  });
-
-  const timeElement = container.querySelector('time');
-  if (timeElement && timeElement.parentNode) {
-    timeElement.parentNode.appendChild(badge);
-  }
-
-  handleAutoAction(container, percentage);
-}
-
-function injectHumanBadge(container, tweetId, author, percentage, isSlopFactory = false) {
-  if (!container || container.querySelector('.zerogpt-human-badge')) return;
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-human-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    margin-left: 8px;
-    border-radius: 9999px;
-    font-size: 10px;
-    font-weight: bold;
-    color: #fff;
-    background-color: #00ba7c;
-    vertical-align: middle;
-    line-height: 1;
-    height: 18px;
-    cursor: help;
-    border: 1px solid rgba(255,255,255,0.2);
-  `;
-  
-  if (isSlopFactory) {
-    badge.innerHTML = `🚩 Slop Factory Tweet ${percentage}% <span class="human-vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="human-vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
-    badge.title = 'This is from a known slop factory. Click 👍 to confirm and add to slop registry.';
-  } else {
-    badge.innerHTML = `🌿 Human-Generated ${percentage}% <span class="human-vote-up" style="cursor:pointer;margin-left:4px;">👍</span><span class="human-vote-down" style="cursor:pointer;margin-left:2px;">👎</span>`;
-    badge.title = 'Verified human-generated content. Click 👍 to add to dataset.';
-  }
-
-  badge.querySelector('.human-vote-up').addEventListener('click', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-
-    const tweetText = container.querySelector('[data-testid="tweetText"]')?.innerText || "";
-
-    if (isSlopFactory) {
-      // Add to slop registry instead of human registry
-      chrome.runtime.sendMessage({
-        action: "manualReport",
-        tweetId: tweetId,
-        text: tweetText,
-        aiScore: percentage,
-        author: author,
-        slopType: "type_slop_factory",
-        shieldType: "shield-red"
-      });
-      console.log(`ZeroSlop Admin: Added slop factory tweet ${tweetId} to registry`);
-    } else {
-      // Add to human registry
-      console.log(`ZeroSlop Admin: Sending voteHuman for tweet ${tweetId}, text length: ${tweetText.length}, author: ${author?.handle}`);
-      chrome.runtime.sendMessage({
-        action: "voteHuman",
-        voteType: "up",
-        tweetId: tweetId,
-        text: tweetText,
-        author: author
-      }, (response) => {
-        console.log(`ZeroSlop Admin: voteHuman response:`, response);
-      });
-      console.log(`ZeroSlop Admin: Added human tweet ${tweetId} to human registry`);
-    }
-
-    badge.querySelector('.human-vote-up').innerText = '✅';
-    badge.querySelector('.human-vote-down').remove();
-  });
-
-  badge.querySelector('.human-vote-down').addEventListener('click', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    // Thumbs down: discard, just remove the badge
-    badge.remove();
-  });
-
-  const timeElement = container.querySelector('time');
-  if (timeElement && timeElement.parentNode) {
-    timeElement.parentNode.appendChild(badge);
-  }
-}
-
-function injectLikelyAIBadge(container, tweetId, author, percentage) {
-  if (!container || container.querySelector('.zerogpt-likely-ai-badge')) return;
-
-  const badge = document.createElement('div');
-  badge.className = 'zerogpt-likely-ai-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    margin-left: 8px;
-    border-radius: 9999px;
-    font-size: 10px;
-    font-weight: bold;
-    color: #fff;
-    background-color: #f4212e;
-    vertical-align: middle;
-    line-height: 1;
-    height: 18px;
-    cursor: help;
-    border: 1px solid rgba(255,255,255,0.2);
-  `;
-  badge.innerHTML = `⚠️ Likely AI ${percentage}%`;
-  badge.title = 'This tweet appears to be AI-generated.';
-
-  const timeElement = container.querySelector('time');
-  if (timeElement && timeElement.parentNode) {
-    timeElement.parentNode.appendChild(badge);
-  }
-}
-
-function injectSmartSlopBadge(container, labelText = "SMART SLOP SIGNAL", bgColor = "#ffd700", textColor = "#000") {
-  if (!container) return;
-  
-  // Do not inject if ANY other ZeroSlop-related badge is already present
-  const hasOtherBadge = container.querySelector(
-    '.zerogpt-badge, .zerogpt-slopfactory-badge, .zerogpt-highai-badge, .zerogpt-organic-badge, .zerogpt-suspicious-badge, .zerogpt-likely-human-badge, .zeroslop-smart-badge'
-  );
-  if (hasOtherBadge) return;
-
-  const badge = document.createElement('div');
-  badge.className = 'zeroslop-smart-badge';
-  badge.style.cssText = `
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 8px;
-    margin-left: 8px;
-    border-radius: 9999px;
-    font-size: 10px;
-    font-weight: bold;
-    color: ${textColor};
-    background-color: ${bgColor};
-    border: 1px solid rgba(0,0,0,0.1);
-    vertical-align: middle;
-    line-height: 1;
-    height: 16px;
-    cursor: help;
-  `;
-  badge.innerHTML = `🟡 ${labelText}`;
-  badge.title = `Smart Slop Guard: Our local model detected structural hallmarks of industrial engagement farming.`;
-
-  const timeElement = container.querySelector('time');
-  if (timeElement && timeElement.parentNode) {
-    timeElement.parentNode.appendChild(badge);
-  }
-}
-
-async function initObservers() {
-  if (window.zerogptObserver) window.zerogptObserver.disconnect();
-  
-  // Initialize local classifier
-  await ZeroSlopClassifier.load();
-
-  const checkContext = () => {
-    const path = window.location.pathname;
-    const parts = path.split('/').filter(Boolean);
-    
-    if (parts.length === 1 && !['home', 'explore', 'notifications', 'messages', 'search', 'settings'].includes(parts[0])) {
-      const handle = '@' + parts[0];
-      chrome.runtime.sendMessage({ action: "checkProfileSlop", handle: handle });
-      chrome.runtime.sendMessage({ action: "checkSuspicious", handle: handle });
-      chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: handle });
-    }
-
-    if (path.includes('/following') || path.includes('/followers') || path.includes('/verified_followers')) {
-      injectListAuditorButton();
-    }
-  };
-  
-  checkContext();
-  
-  let lastPath = window.location.pathname;
-  const navObserver = new MutationObserver(() => {
-    if (window.location.pathname !== lastPath) {
-      lastPath = window.location.pathname;
-      checkContext();
-      ['zerogpt-profile-banner', 'zerogpt-suspicious-banner', 'zerogpt-list-auditor'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.remove();
-      });
-    }
-  });
-  navObserver.observe(document.head, { childList: true, subtree: true });
-
-  window.zerogptObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        const container = entry.target;
-        
-        if (container.tagName === 'ARTICLE' && !container.dataset.zerogptChecked) {
-          container.dataset.zerogptChecked = "true";
-          highlightSlopMarkers(container);
-          const info = extractTweetInfo(container);
-          
-          // Local Prediction for Automatic Badging
-          if (info.text && info.text.length > 20) {
-            const prediction = ZeroSlopClassifier.predict(info.text);
-            if (prediction) {
-              const { label, probability, probabilities } = prediction;
-
-              // Check if Smart Slop Guard is enabled
-              chrome.storage.local.get(['autoHumanDetection'], (result) => {
-                if (result.autoHumanDetection) {
-                  if (label === 'slop-factory' && probability > 0.70) {
-                    injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
-                  } else if (label === 'ai-generated' && probability > 0.70) {
-                    injectSmartSlopBadge(container, "SMART SLOP SIGNAL", "#ffd700", "#000");
-                  }
-                }
-              });
-            }
-          }
-
-          if (info.tweetId && !info.tweetId.startsWith('local-')) {
-            // Add data attribute for easy lookup
-            container.setAttribute('data-zerogpt-tweet-id', info.tweetId);
-
-            // Layer 1: Community Shield - check registry (free, enabled by default)
-            chrome.storage.local.get(['communityShield'], (shieldResult) => {
-              if (shieldResult.communityShield !== false) {
-                chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: info.tweetId });
-              }
-            });
-
-            // Layer 4: Auto-scan with ZeroGPT API (paid, opt-in)
-            chrome.storage.local.get(['autoScan', 'adminOrganicCollection'], (result) => {
-              if (result.autoScan || result.adminOrganicCollection) {
-                chrome.runtime.sendMessage({
-                  action: "autoScanTweet",
-                  text: info.text,
-                  tweetId: info.tweetId,
-                  author: info.author
-                });
-              }
-            });
-            if (info.author?.handle) {
-              chrome.runtime.sendMessage({ action: "checkSuspicious", handle: info.author.handle });
-              chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: info.author.handle });
-            }
-          }
-        }
-
-        if (container.getAttribute('data-testid') === 'UserCell' && !container.dataset.zerogptChecked) {
-          container.dataset.zerogptChecked = "true";
-          const handleEl = container.querySelector('span:nth-child(2)');
-          if (handleEl && handleEl.innerText.startsWith('@')) {
-            const handle = handleEl.innerText;
-            chrome.runtime.sendMessage({ action: "checkSlopAccount", handle: handle });
-            chrome.runtime.sendMessage({ action: "checkSuspicious", handle: handle });
-          }
-        }
-      }
-    });
-  }, { threshold: 0.1 });
-
-  const mutationObserver = new MutationObserver((mutations) => {
-    mutations.forEach(mutation => {
-      mutation.addedNodes.forEach(node => {
-        if (node.nodeType === 1) {
-          if (node.tagName === 'ARTICLE' || node.getAttribute('data-testid') === 'UserCell') {
-            window.zerogptObserver.observe(node);
-          } else {
-            const newTargets = node.querySelectorAll('article, [data-testid="UserCell"]');
-            newTargets.forEach(t => window.zerogptObserver.observe(t));
-          }
-        }
-      });
-    });
-  });
-
-  mutationObserver.observe(document.body, { childList: true, subtree: true });
-
-  const retweetObserver = new MutationObserver((mutations) => {
-    const path = window.location.pathname;
-    if (path.includes('/retweets') || path.includes('/quotes')) {
-      const match = path.match(/\/status\/(\d+)/);
-      if (match) {
-        const tweetId = match[1];
-        chrome.runtime.sendMessage({ action: "checkRegistry", tweetId: tweetId }, (data) => {
-          const factoryHandle = data?.author_handle;
-          if (data && data.ai_score > 15) {
-            const userCells = document.querySelectorAll('[data-testid="UserCell"]');
-            userCells.forEach(cell => {
-              const handleEl = cell.querySelector('span:nth-child(2)');
-              if (handleEl && handleEl.innerText.startsWith('@')) {
-                const handle = handleEl.innerText;
-                const nameEl = cell.querySelector('span:nth-child(1)');
-                const pfpEl = cell.querySelector('img');
-                chrome.runtime.sendMessage({
-                  action: "reportSuspicious",
-                  handle: handle,
-                  name: nameEl?.innerText,
-                  pfp: pfpEl?.src,
-                  tweetId: tweetId,
-                  factoryHandle: factoryHandle
-                });
-              }
-            });
-          }
-        });
-      }
-    }
-  });
-  retweetObserver.observe(document.body, { childList: true, subtree: true });
-
-  const articles = document.querySelectorAll('article, [data-testid="UserCell"]');
-  articles.forEach(el => window.zerogptObserver.observe(el));
-}
-
-function injectListAuditorButton() {
-  if (document.getElementById('zerogpt-list-auditor')) return;
-  const header = document.querySelector('[data-testid="primaryColumn"]');
-  if (!header) return;
-
-  const btn = document.createElement('button');
-  btn.id = 'zerogpt-list-auditor';
-  btn.innerText = '🕵️ Run Bounty Hunter Audit on this List';
-  btn.style.cssText = `
-    width: 100%;
-    background: #1d9bf0;
-    color: white;
-    border: none;
-    padding: 12px;
-    font-weight: bold;
-    cursor: pointer;
-    border-bottom: 1px solid #2f3336;
-    font-size: 14px;
-    z-index: 10;
-  `;
-
-  btn.onclick = () => {
-    const handles = Array.from(document.querySelectorAll('[data-testid="UserCell"] span:nth-child(2)'))
-      .map(el => el.innerText)
-      .filter(h => h.startsWith('@'));
-    if (handles.length === 0) {
-      alert("No handles detected yet. Scroll down to load more!");
-      return;
-    }
-    const handleList = handles.join(',');
-    window.open(`https://woodrock.github.io/zero-slop?audit=${handleList}`, '_blank');
-  };
-  header.prepend(btn);
-}
-
 function autoScanAmplifiers() {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('zerogpt_scan') === 'true') {
@@ -1258,9 +1328,11 @@ async function generateWantedPoster(author, percentage) {
   ctx.fillStyle = '#5d4037';
   ctx.font = 'bold 20px Arial';
   ctx.fillText('stamped by github.com/woodrock/zero-slop', canvas.width / 2, 750);
-  return canvas.toBlob((blob) => {
-    const item = new ClipboardItem({ "image/png": blob });
-    navigator.clipboard.write([item]).then(() => { alert("Wanted Poster copied to clipboard! Share the truth. 🛡️"); });
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) return reject(new Error('Could not render the poster'));
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(resolve, reject);
+    });
   });
 }
 
@@ -1400,464 +1472,191 @@ const UNIFIED_SLOP_RULES = [
   { regex: /\+.{0,20}\+.{0,20}=/g, label: "Math-Washing", description: "Weaponizes the Complexity Fallacy with oversimplified equations.", points: 1 }
 ];
 
-const SLOP_HEURISTICS = {
-  hardBlocks: UNIFIED_SLOP_RULES.filter(r => r.points >= 5),
-  softSignals: UNIFIED_SLOP_RULES.filter(r => r.points < 5)
-};
 
 
-function highlightSlopMarkers(element) {
-  if (!element) return;
-  const tweetTextDiv = element.querySelector('[data-testid="tweetText"]');
-  if (!tweetTextDiv || tweetTextDiv.dataset.hunterVision) return;
-  chrome.storage.local.get(['hunterVision'], (result) => {
-    if (!result.hunterVision) return;
-    let html = tweetTextDiv.innerHTML;
-    let text = tweetTextDiv.innerText;
-    let found = false;
-    let score = 0;
-    const hour = new Date().getUTCHours();
-    if (hour >= 0 && hour <= 7) score += 0.5;
-    SLOP_HEURISTICS.hardBlocks.forEach(h => {
-      if (h.regex.test(text)) {
-        html = html.replace(h.regex, (match) => {
-          found = true; score += 5;
-          return `<span style="background: rgba(244, 33, 46, 0.25); border-bottom: 2px solid #f4212e; color: #f4212e; font-weight: bold; cursor: help;" title="${h.label}: ${h.description}">${match}</span>`;
-        });
-      }
-    });
-    SLOP_HEURISTICS.softSignals.forEach(s => {
-      if (s.regex.test(text)) {
-        html = html.replace(s.regex, (match) => {
-          found = true; score += s.points;
-          return `<span style="background: rgba(255, 215, 0, 0.15); border-bottom: 2px dashed #ffd700; color: #ffd700; cursor: help;" title="${s.label}: ${s.description}">${match}</span>`;
-        });
-      }
-    });
-    if (found) {
-      tweetTextDiv.innerHTML = html;
-      tweetTextDiv.dataset.hunterVision = "true";
-      if (score >= 3) {
-        const diagnostic = document.createElement('div');
-        diagnostic.innerText = `🚩 Heuristic Slop Score: ${score.toFixed(1)}`;
-        diagnostic.style.cssText = "font-size: 10px; color: #f4212e; margin-top: 4px; font-weight: bold; opacity: 0.8;";
-        tweetTextDiv.parentElement.appendChild(diagnostic);
-      }
-    }
-  });
+// ---------------------------------------------------------------------------
+// Scan result card (shown after a right-click scan)
+// ---------------------------------------------------------------------------
+
+function suggestSlopType(text) {
+  const t = (text || '').toLowerCase();
+  if (t.includes('$10k') || t.includes('10,000') || t.includes('60 minutes')) return 'type_psych_burnout';
+  if (t.includes('no skill') || t.includes('no luck')) return 'type_psych_imposter';
+  if (t.includes('20 tools') || t.includes('10 tools')) return 'type_algo_overload';
+  if (t.includes('comment') || t.includes('reply')) return 'type_algo_consensus';
+  if (t.includes('harvard') || t.includes('google') || t.includes('mckinsey')) return 'type_struct_launder';
+  if (t.includes('thread') || t.includes('🧵')) return 'type_algo_curiosity';
+  return '';
 }
 
-function handleAutoAction(container, percentage) {
-  chrome.storage.local.get(['slopAction', 'hideThreshold'], (result) => {
-    const action = result.slopAction || 'blur';
-    const threshold = result.hideThreshold !== undefined ? result.hideThreshold : 85;
-    if (percentage >= threshold) {
-      const contentDiv = container.querySelector('[data-testid="tweetText"]')?.parentElement;
-      if (!contentDiv) return;
-      if (action === 'zap') { 
-        // 1. Initial "Snap" Pulse
-        container.style.transition = 'none';
-        container.style.animation = 'zerogptSnap 1.5s forwards ease-in-out';
-        container.style.pointerEvents = 'none';
-        
-        // 2. Physical removal after animation finishes
-        setTimeout(() => {
-          container.style.display = 'none'; 
-        }, 1500);
-      } 
-      else if (action === 'blur') {
-        contentDiv.style.filter = 'blur(8px)';
-        contentDiv.style.opacity = '0.6';
-        contentDiv.style.transition = 'all 0.3s ease';
-        contentDiv.style.cursor = 'pointer';
-        contentDiv.title = 'Click to reveal AI Slop';
-        contentDiv.addEventListener('click', function reveal() {
-          contentDiv.style.filter = 'none';
-          contentDiv.style.opacity = '1';
-          contentDiv.style.cursor = 'default';
-          contentDiv.title = '';
-          contentDiv.removeEventListener('click', reveal);
-        });
-      }
-    }
+function buildReportDetails(info) {
+  const details = el('details', { class: 'zs-details' }, [el('summary', { text: 'Add details (optional)' })]);
+
+  const selectId = 'zs-slop-type';
+  const select = el('select', { id: selectId, class: 'zs-select' }, [el('option', { value: '', text: 'General slop' })]);
+  const suggested = suggestSlopType(info?.text);
+  SLOP_TYPES.filter((t) => t.id !== 'type_organic_human').forEach((t) => {
+    const opt = el('option', { value: t.id, text: `${t.emoji} ${t.name}` });
+    if (t.id === suggested) opt.selected = true;
+    select.appendChild(opt);
   });
+  const hint = el('div', { class: 'zs-hint' });
+  const updateHint = () => {
+    const selected = SLOP_TYPES.find((t) => t.id === select.value);
+    hint.textContent = selected ? selected.description : 'Pick the tactic that fits best, or leave it as general slop.';
+  };
+  select.addEventListener('change', updateHint);
+  updateHint();
+
+  const check = (label) => {
+    const input = el('input', { type: 'checkbox' });
+    return { input, node: el('label', { class: 'zs-check' }, [input, label]) };
+  };
+  const accountable = check('No accountable author');
+  const funnel = check('Contains a funnel or call to action');
+  const replicable = check('Claims can’t be replicated');
+
+  const shieldName = `zs-shield-${Date.now()}`;
+  const radio = (value, label, checked = false) => {
+    const input = el('input', { type: 'radio', name: shieldName, value, checked });
+    return el('label', { class: 'zs-check' }, [input, label]);
+  };
+
+  details.append(
+    el('label', { class: 'zs-field-label', for: selectId, text: 'Tactic' }), select, hint,
+    el('div', { class: 'zs-field-label', text: 'Extraction test' }), accountable.node, funnel.node, replicable.node,
+    el('div', { class: 'zs-field-label', text: 'Label the account as' }),
+    radio('shield-none', 'Leave the account unlabelled', true),
+    radio('shield-red', 'Slop factory (bot network, funnels)'),
+    radio('shield-blue', 'High AI usage')
+  );
+
+  return {
+    node: details,
+    read: () => ({
+      slopType: select.value,
+      extractionResults: { accountability: accountable.input.checked, funnel: funnel.input.checked, replicability: replicable.input.checked },
+      shieldType: details.querySelector(`input[name="${shieldName}"]:checked`)?.value || 'shield-none'
+    })
+  };
 }
 
-async function runThanosSnap(element) {
-  const rect = element.getBoundingClientRect();
-  const canvas = await elementToCanvas(element);
-  if (!canvas) {
-    element.style.display = 'none';
+function autoCloseCard(card, delay = 4000) {
+  let timer;
+  const arm = () => { clearTimeout(timer); timer = setTimeout(() => card.remove(), delay); };
+  card.addEventListener('mouseenter', () => clearTimeout(timer));
+  card.addEventListener('mouseleave', arm);
+  arm();
+}
+
+function showResultCard({ state, pct = 0, words, scope = 'tweet', info, message }) {
+  document.getElementById('zs-result-card')?.remove();
+
+  const tone = state === 'error' ? 'red' : state === 'loading' ? 'blue' : scoreTone(pct);
+  const card = el('section', {
+    id: 'zs-result-card',
+    class: `zs-surface zs-card zs-tone-${tone}`,
+    role: state === 'error' ? 'alert' : 'dialog',
+    'aria-label': 'ZeroSlop scan result',
+    'aria-live': 'polite'
+  });
+  ['click', 'mousedown', 'pointerdown'].forEach((t) => card.addEventListener(t, (e) => e.stopPropagation()));
+
+  const scopeLabel = { tweet: 'Post scan', thread: 'Thread scan', profile: 'Profile scan', selection: 'Selected text' }[scope] || 'Scan';
+  card.appendChild(el('div', { class: 'zs-card-head' }, [
+    el('span', { class: 'zs-eyebrow', text: state === 'error' ? 'ZeroSlop' : `ZeroSlop · ${scopeLabel}` }),
+    el('button', { type: 'button', class: 'zs-icon-btn', 'aria-label': 'Close', onclick: () => card.remove() }, '×')
+  ]));
+
+  if (state === 'loading') {
+    card.appendChild(el('div', { class: 'zs-loading' }, [
+      el('div', { class: 'zs-spinner', 'aria-hidden': 'true' }),
+      el('div', {}, [
+        el('div', { class: 'zs-title', text: 'Scanning with ZeroGPT…' }),
+        el('div', { class: 'zs-muted', text: 'This usually takes a few seconds.' })
+      ])
+    ]));
+    document.body.appendChild(card);
     return;
   }
 
-  // 1. Initial "Snap" Jitter
-  element.style.transition = 'all 0.3s ease';
-  element.style.transform = 'scale(1.05)';
-  element.style.filter = 'brightness(1.5) blur(1px)';
-  
-  const ctx = canvas.getContext('2d');
-  const { width, height } = canvas;
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const pixelArr = imageData.data;
-  
-  // Create 32 layers for the "dust"
-  const layerCount = 32;
-  const layers = Array.from({ length: layerCount }, () => {
-    const c = document.createElement('canvas');
-    c.width = width;
-    c.height = height;
-    c.style.cssText = `
-      position: absolute;
-      left: ${rect.left + window.scrollX}px;
-      top: ${rect.top + window.scrollY}px;
-      width: ${rect.width}px;
-      height: ${rect.height}px;
-      pointer-events: none;
-      z-index: 2147483646;
-      transition: transform 1.5s ease-out, opacity 1.5s ease-out, filter 1.5s ease-out;
-    `;
-    return c;
-  });
-
-  // 2. Distribute pixels with a horizontal bias (the "Sweep")
-  for (let i = 0; i < pixelArr.length; i += 4) {
-    // Skip transparent pixels
-    if (pixelArr[i+3] === 0) continue;
-
-    const x = (i / 4) % width;
-    const y = Math.floor((i / 4) / width);
-    
-    // Pick a layer based on X-coordinate + randomness to create a "trailing" edge
-    const normalizedX = x / width;
-    const layerIndex = Math.floor(layerCount * (normalizedX + (Math.random() - 0.5) * 0.5));
-    const safeIndex = Math.max(0, Math.min(layerCount - 1, layerIndex));
-    
-    const layerCtx = layers[safeIndex].getContext('2d');
-    layerCtx.fillStyle = `rgba(${pixelArr[i]}, ${pixelArr[i+1]}, ${pixelArr[i+2]}, ${pixelArr[i+3]/255})`;
-    // Draw 2x2 particles for better visibility
-    layerCtx.fillRect(x, y, 1.5, 1.5);
+  if (state === 'error') {
+    const missingKey = /api key/i.test(message || '');
+    card.append(
+      el('p', { class: 'zs-title', text: missingKey ? 'Add your ZeroGPT API key first' : 'The scan didn’t work' }),
+      el('p', { class: 'zs-muted', style: 'margin: 6px 0 0', text: missingKey
+        ? 'Deep scans use your own ZeroGPT key. Click the ZeroSlop icon in your toolbar, open Deep scan, and paste your key.'
+        : (message || 'Please try again in a moment.') })
+    );
+    document.body.appendChild(card);
+    return;
   }
 
-  setTimeout(() => {
-    // Hide real element
-    element.style.opacity = '0';
-    element.style.pointerEvents = 'none';
-    
-    layers.forEach((l, i) => {
-      document.body.appendChild(l);
-      
-      // Force reflow
-      l.offsetWidth; 
-      
-      // 3. The "Ash" Drift Physics
-      // Stagger the start based on layer index (left-to-right sweep)
-      const delay = i * 25; 
-      setTimeout(() => {
-        const angle = (Math.random() - 0.5) * 0.5; // Slight drift angle
-        const driftX = 80 + Math.random() * 100;
-        const driftY = -60 - Math.random() * 50;
-        const rotate = (Math.random() - 0.5) * 30;
-        
-        l.style.transform = `translate(${driftX}px, ${driftY}px) rotate(${rotate}deg)`;
-        l.style.opacity = '0';
-        l.style.filter = 'blur(2px)';
-      }, delay);
+  // Result
+  const flagged = pct > ZS_AI_FLAG_THRESHOLD;
+  const metaBits = [];
+  if (words) metaBits.push(`${words} words`);
+  if (scope === 'thread' || scope === 'profile') metaBits.push(`${info?.tweetCount || 'several'} posts combined`);
+  metaBits.push('Scored by ZeroGPT');
 
-      // Cleanup
-      setTimeout(() => {
-        l.remove();
-        if (i === layerCount - 1) {
-          element.style.display = 'none';
-        }
-      }, 2000);
+  card.append(
+    el('div', { class: 'zs-score' }, [
+      el('span', { class: 'zs-score-num', text: `${pct}%` }),
+      el('span', { class: 'zs-score-label', text: scoreVerdict(pct) })
+    ]),
+    el('div', { class: 'zs-meter', role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct), 'aria-label': 'AI likelihood' }, [
+      el('span', { style: `width: ${Math.max(2, Math.min(100, pct))}%` })
+    ]),
+    el('div', { class: 'zs-muted', text: metaBits.join(' · ') })
+  );
+
+  const stack = el('div', { class: 'zs-stack' });
+  const canReport = !!info && !!info.text;
+
+  if (canReport) {
+    const details = buildReportDetails(info);
+    const finish = (text) => {
+      stack.replaceChildren(el('div', { class: 'zs-confirm', role: 'status' }, [`✓ ${text}`]));
+      autoCloseCard(card);
+    };
+    const report = el('button', { type: 'button', class: `zs-btn ${flagged ? 'zs-btn-danger' : 'zs-btn-secondary'}` }, 'Report as slop');
+    const human = el('button', { type: 'button', class: `zs-btn ${flagged ? 'zs-btn-secondary' : 'zs-btn-primary'}` }, 'It’s human');
+
+    report.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ action: 'manualReport', aiScore: pct, ...details.read(), ...info });
+      finish('Reported to the registry. Thanks!');
     });
-  }, 300); // Wait for the initial "snap" jitter
-}
+    human.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ action: 'manualReport', aiScore: 0, slopType: 'type_organic_human', shieldType: 'shield-green', ...info });
+      finish('Marked as human. Thanks!');
+    });
 
-function elementToCanvas(el) {
-  return new Promise((resolve) => {
-    const width = el.offsetWidth;
-    const height = el.offsetHeight;
-    if (width === 0 || height === 0) return resolve(null);
-
-    // Capture clone to avoid capturing the extension UI inside the element
-    const clone = el.cloneNode(true);
-    clone.style.width = width + 'px';
-    clone.style.height = height + 'px';
-    
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-        <foreignObject width="100%" height="100%">
-          <div xmlns="http://www.w3.org/1999/xhtml" style="font-family: sans-serif; color: white; background: transparent;">
-            ${el.innerHTML.replace(/&nbsp;/g, ' ')}
-          </div>
-        </foreignObject>
-      </svg>`;
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const img = new Image();
-    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    
-    img.onload = () => {
-      canvas.getContext('2d').drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-      resolve(canvas);
-    };
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
-}
-
-function showOverlay(message, type = "info", currentAiScore = 0) {
-  const existing = document.getElementById('zerogpt-overlay');
-  if (existing) existing.remove();
-  const overlay = document.createElement('div');
-  overlay.id = 'zerogpt-overlay';
-  overlay.style.cssText = `
-    position: fixed;
-    top: 60px;
-    right: 20px;
-    background: white;
-    color: black;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: 0 10px 50px rgba(0,0,0,0.3);
-    z-index: 2147483647;
-    max-width: 320px;
-    min-width: 250px;
-    border-left: 8px solid ${type === 'error' ? '#f4212e' : type === 'success' ? '#1d9bf0' : '#ffd700'};
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    animation: zerogptSlideIn 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
-    display: block !important;
-  `;
-  const title = document.createElement('div');
-  title.innerText = type === 'error' ? "ZeroGPT Error" : type === 'success' ? "Detection Result" : "Processing...";
-  title.style.fontWeight = '800';
-  title.style.marginBottom = '12px';
-  title.style.fontSize = '1.2rem';
-  title.style.color = '#000';
-  const content = document.createElement('div');
-  content.innerText = message;
-  content.style.whiteSpace = 'pre-wrap';
-  content.style.fontSize = '1rem';
-  content.style.lineHeight = '1.4';
-  content.style.color = '#333';
-  overlay.appendChild(title);
-  overlay.appendChild(content);
-  if (type === 'success') {
-    const btnContainer = document.createElement('div');
-    btnContainer.style.display = 'flex';
-    btnContainer.style.flexDirection = 'column';
-    btnContainer.style.gap = '8px';
-    btnContainer.style.marginTop = '15px';
-    
-    try {
-      const info = currentOverlayInfo || extractTweetInfo(lastRightClickedElement);
-      if (!message.includes('Reported')) {
-        let suggestedType = "";
-        if (info?.text) {
-          const text = info.text.toLowerCase();
-          if (text.includes('$10k') || text.includes('10,000') || text.includes('60 minutes')) suggestedType = "type_psych_burnout";
-          else if (text.includes('no skill') || text.includes('no luck')) suggestedType = "type_psych_imposter";
-          else if (text.includes('20 tools') || text.includes('10 tools')) suggestedType = "type_algo_overload";
-          else if (text.includes('comment') || text.includes('reply')) suggestedType = "type_algo_consensus";
-          else if (text.includes('harvard') || text.includes('google') || text.includes('mckinsey')) suggestedType = "type_struct_launder";
-          else if (text.includes('thread') || text.includes('🧵')) suggestedType = "type_algo_curiosity";
-        }
-        const reportBtn = document.createElement('button');
-        reportBtn.innerText = '🚩 Report as AI Slop';
-        reportBtn.style.cssText = `background: #f4212e; color: white; border: none; padding: 12px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.95rem;`;
-        const detailsDrawer = document.createElement('div');
-        detailsDrawer.style.cssText = `display: none; background: #f7f9f9; border-radius: 12px; padding: 12px; border: 1px solid #e1e8ed; margin-top: 5px;`;
-        const toggleDetails = document.createElement('div');
-        toggleDetails.innerText = "Add Details (Optional) ▾";
-        toggleDetails.style.cssText = "font-size: 0.75rem; color: #536471; cursor: pointer; text-align: center; margin-top: 4px; text-decoration: underline;";
-        toggleDetails.onclick = () => {
-          detailsDrawer.style.display = detailsDrawer.style.display === 'none' ? 'block' : 'none';
-          toggleDetails.innerText = detailsDrawer.style.display === 'none' ? "Add Details (Optional) ▾" : "Hide Details ▴";
-        };
-        const slopSelect = document.createElement('select');
-        slopSelect.style.cssText = "width: 100%; padding: 5px; border-radius: 6px; border: 1px solid #cfd9de; font-size: 0.8rem; margin-bottom: 6px;";
-        const descBox = document.createElement('div');
-        descBox.style.cssText = "font-size: 0.75rem; color: #536471; background: #fff; border: 1px solid #e1e8ed; padding: 8px; border-radius: 6px; margin-bottom: 10px; line-height: 1.3; display: none;";
-        const defaultOpt = document.createElement('option');
-        defaultOpt.value = ""; defaultOpt.text = "General Slop";
-        slopSelect.appendChild(defaultOpt);
-        SLOP_TYPES.forEach(t => {
-          const opt = document.createElement('option');
-          opt.value = t.id; opt.text = `${t.emoji} ${t.name}`;
-          opt.title = t.description; // Tooltip on hover
-          if (t.id === suggestedType) opt.selected = true;
-          slopSelect.appendChild(opt);
-        });
-        const updateDesc = () => {
-          const selected = SLOP_TYPES.find(t => t.id === slopSelect.value);
-          if (selected) {
-            descBox.innerText = selected.description;
-            descBox.style.display = 'block';
-          } else {
-            descBox.style.display = 'none';
-          }
-        };
-        slopSelect.onchange = updateDesc;
-        if (suggestedType) updateDesc();
-        detailsDrawer.appendChild(slopSelect);
-        detailsDrawer.appendChild(descBox);
-        const createCheck = (id, label) => {
-          const div = document.createElement('label');
-          div.style.cssText = "display: flex; align-items: center; gap: 6px; font-size: 0.75rem; margin-bottom: 4px; cursor: pointer;";
-          const cb = document.createElement('input');
-          cb.type = 'checkbox'; cb.id = id;
-          div.appendChild(cb); div.appendChild(document.createTextNode(label));
-          return { div, cb };
-        };
-        const check1 = createCheck('chk-acc', 'No accountable author');
-        const check2 = createCheck('chk-fun', 'Contains funnel/CTA');
-        const check3 = createCheck('chk-rep', 'Not replicable/Fake');
-        detailsDrawer.appendChild(check1.div);
-        detailsDrawer.appendChild(check2.div);
-        detailsDrawer.appendChild(check3.div);
-        const shieldLabel = document.createElement('div');
-        shieldLabel.innerText = "Shield Type (Optional):";
-        shieldLabel.style.cssText = "font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; color: #536471; margin-top: 8px;";
-        detailsDrawer.appendChild(shieldLabel);
-        const shieldContainer = document.createElement('div');
-        shieldContainer.style.cssText = "display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px;";
-        const createShieldOption = (id, label, color) => {
-          const div = document.createElement('label');
-          div.style.cssText = `display: flex; align-items: center; gap: 6px; font-size: 0.75rem; cursor: pointer; color: ${color}; font-weight: bold;`;
-          const radio = document.createElement('input');
-          radio.type = 'radio'; radio.name = 'shield-type'; radio.id = id; radio.value = id;
-          div.appendChild(radio); div.appendChild(document.createTextNode(label));
-          return { div, radio };
-        };
-        const optRed = createShieldOption('shield-red', '🚩 RED: Slop Factory', '#f4212e');
-        const optBlue = createShieldOption('shield-blue', '🔵 BLUE: High AI Usage', '#1d9bf0');
-        const optNone = createShieldOption('shield-none', '⚪ None (General Slop)', '#71767b');
-        optNone.radio.checked = true;
-        shieldContainer.appendChild(optRed.div);
-        shieldContainer.appendChild(optBlue.div);
-        shieldContainer.appendChild(optNone.div);
-        detailsDrawer.appendChild(shieldContainer);
-        reportBtn.onclick = () => {
-          if (info) {
-            const selectedShield = detailsDrawer.querySelector('input[name="shield-type"]:checked').value;
-            chrome.runtime.sendMessage({
-              action: "manualReport",
-              aiScore: currentAiScore,
-              slopType: slopSelect.value,
-              extractionResults: { accountability: check1.cb.checked, funnel: check2.cb.checked, replicability: check3.cb.checked },
-              shieldType: selectedShield,
-              ...info
-            });
-            reportBtn.innerText = '✅ Reported to Registry';
-            reportBtn.style.background = '#00ba7c';
-            reportBtn.disabled = true; toggleDetails.remove(); detailsDrawer.remove();
-          }
-        };
-
-        const safeBtn = document.createElement('button');
-        safeBtn.innerText = '🌿 Mark as Organic (Human)';
-        safeBtn.style.cssText = `background: #00ba7c; color: white; border: none; padding: 12px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.95rem; margin-top: 5px;`;
-        safeBtn.onclick = () => {
-          if (info) {
-            chrome.runtime.sendMessage({
-              action: "manualReport",
-              aiScore: 0,
-              slopType: "type_organic_human",
-              shieldType: "shield-green",
-              ...info
-            });
-            safeBtn.innerText = '✅ Verified Organic';
-            safeBtn.disabled = true;
-            if (reportBtn) reportBtn.remove();
-            toggleDetails.remove();
-            detailsDrawer.remove();
-          }
-        };
-
-        btnContainer.appendChild(toggleDetails);
-        btnContainer.appendChild(detailsDrawer);
-        btnContainer.appendChild(reportBtn);
-        btnContainer.appendChild(safeBtn);
-      }
-      const posterBtn = document.createElement('button');
-      posterBtn.innerText = '🖼️ Generate Wanted Poster';
-      posterBtn.style.cssText = `background: #1d9bf0; color: white; border: none; padding: 10px; border-radius: 20px; cursor: pointer; font-weight: bold; width: 100%; font-size: 0.9rem;`;
-      posterBtn.onclick = () => {
-        if (info && info.author) {
-          posterBtn.innerText = '⌛ Generating...';
-          generateWantedPoster(info.author, currentAiScore).then(() => {
-            posterBtn.innerText = '📋 Copied to Clipboard!';
-            setTimeout(() => posterBtn.innerText = '🖼️ Generate Wanted Poster', 3000);
-          });
-        }
-      };
-      btnContainer.appendChild(posterBtn);
-    } catch (e) {
-      console.error("ZeroSlop: Error building overlay buttons", e);
-    }
-    overlay.appendChild(btnContainer);
+    stack.append(el('div', { class: 'zs-row' }, flagged ? [report, human] : [human, report]), details.node);
   }
-  const closeBtn = document.createElement('button');
-  closeBtn.innerText = '✕';
-  closeBtn.style.cssText = `position: absolute; top: 10px; right: 10px; background: #eee; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #555;`;
-  closeBtn.onclick = () => overlay.remove();
-  let isHovered = false;
-  overlay.onmouseenter = () => { isHovered = true; };
-  overlay.onmouseleave = () => { isHovered = false; };
-  overlay.appendChild(closeBtn);
-  document.body.appendChild(overlay);
-  if (type !== 'error') {
-    const timeoutDuration = type === 'success' ? 8000 : 4000;
-    const attemptHide = () => {
-      if (isHovered) { setTimeout(attemptHide, 2000); return; }
-      if (overlay.parentNode) {
-        overlay.style.opacity = '0';
-        overlay.style.transition = 'opacity 0.5s';
-        setTimeout(() => overlay.remove(), 500);
-      }
-    };
-    setTimeout(attemptHide, timeoutDuration);
+
+  if (info?.author?.handle && info.author.handle !== '@anonymous' && flagged) {
+    const poster = el('button', { type: 'button', class: 'zs-btn zs-btn-ghost' }, '🖼️ Copy a “wanted” poster');
+    poster.addEventListener('click', () => {
+      poster.disabled = true;
+      poster.textContent = 'Making poster…';
+      generateWantedPoster(info.author, pct)
+        .then(() => zsToast('Poster copied to your clipboard.', { tone: 'green' }))
+        .catch(() => zsToast('Couldn’t copy the poster. Your browser may have blocked clipboard access.', { tone: 'red' }))
+        .finally(() => { poster.disabled = false; poster.textContent = '🖼️ Copy a “wanted” poster'; });
+    });
+    stack.append(poster);
   }
+
+  if (stack.childNodes.length) card.appendChild(stack);
+  document.body.appendChild(card);
 }
 
+// ---------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------
+
+injectStyles();
+syncTheme();
 initObservers();
 autoScanAmplifiers();
-console.log("ZeroSlop: Content script v1.3.10 initialized.");
-
-if (!document.getElementById('zerogpt-styles')) {
-  const style = document.createElement('style');
-  style.id = 'zerogpt-styles';
-  style.textContent = `
-    @keyframes zerogptSlideIn {
-      from { transform: translateX(120%); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes zerogptSnap {
-      0% { 
-        filter: blur(0) brightness(1) grayscale(0); 
-        transform: scale(1) rotate(0);
-        opacity: 1;
-      }
-      10% { 
-        filter: blur(1px) brightness(1.5) grayscale(0.2); 
-        transform: scale(1.05) rotate(0.5deg) translateX(-2px);
-      }
-      30% {
-        filter: blur(3px) brightness(1.2) grayscale(0.5) sepia(0.5);
-        transform: scale(1.02) rotate(-0.5deg) translateX(2px);
-      }
-      100% { 
-        filter: blur(30px) brightness(0.5) grayscale(1) sepia(1) contrast(1.5);
-        transform: scale(0.8) translate(200px, -100px) rotate(15deg) skew(20deg);
-        opacity: 0;
-      }
-    }
-  `;
-  document.head.appendChild(style);
-}
+console.log(`ZeroSlop: content script v${ZS_VERSION} ready.`);
