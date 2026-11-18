@@ -1,6 +1,6 @@
 # Privacy Policy for ZeroSlop
 
-**Last Updated:** March 22, 2026
+**Last Updated:** November 18, 2026
 
 ZeroSlop is committed to protecting your privacy. This Privacy Policy explains how we handle your data when you use the ZeroSlop Chrome Extension and participate in the Community Registry.
 
@@ -12,6 +12,8 @@ The following information is stored **locally** on your device using your browse
 *   **ZeroGPT API Key:** Provided by you to enable the AI detection service.
 *   **Local Scan History:** A record of the tweets you have scanned and their detection scores.
 *   **Settings:** Your preferences (Auto-Scan, Hunter Vision, Thresholds).
+*   **Image Check Results:** Scores for the images and videos you check (up to 500), so posts are re-labelled when you revisit them.
+*   **On-device Models:** The AI-image detector (about 87 MB) and, if you choose to download it, Gemma 4 (about 3.4 GB). You can remove Gemma 4 from the popup.
 
 ### 1.2. Community Registry (Public Data)
 When you use the **"Report as AI Slop"** or **"Mark as Slop Factory"** features, or when **Auto-Scan** detects high-confidence slop, the following anonymized metadata is sent to the **ZeroSlop Registry** (hosted on Firebase/Firestore):
@@ -20,10 +22,17 @@ When you use the **"Report as AI Slop"** or **"Mark as Slop Factory"** features,
 *   **Author Metadata:** Public handle, display name, and profile picture of the account producing the slop.
 *   **Reporting Metadata:** Timestamp and the specific "Dimension of Slop" category (e.g., Burnout Exploit).
 
+When you use **"Check this post's image or video"**, the image is analysed on your device and never uploaded. Only the result is sent to the registry:
+*   **Image Link & IDs:** The image's address on X's image server, the tweet ID, and the author's public handle.
+*   **AI Image Score:** The detector's score, the model name, and the time of the check.
+*   **Votes:** Whether you said a score looks right or wrong, if you vote.
+
+Explanations from Gemma 4 stay on your device and are not sent anywhere.
+
 **Note:** This data is public and used to build the community-powered network map and registry. No personally identifiable information (PII) about *you* (the reporter) is collected or stored in this process.
 
 ### 1.3. Data in Transit
-When performing a scan, tweet text is sent over a secure connection (HTTPS) to:
+When performing a scan, tweet text is sent over a secure connection (HTTPS) to the services below. The on-device models are downloaded once from Hugging Face (huggingface.co); images you check are fetched from X's own image server (pbs.twimg.com).
 *   **ZeroGPT Business API** (api.zerogpt.com): For neural curvature analysis.
 *   **ZeroSlop Registry** (firestore.googleapis.com): For community verification and global stats.
 

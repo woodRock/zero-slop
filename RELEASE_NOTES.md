@@ -1,5 +1,24 @@
 # Release Notes
 
+## v1.6.0 (November 18, 2026)
+
+### On-device image check
+- **Right-click any post with a photo or video → ZeroSlop → Check this post’s image or video.** X covers images with overlays, so you don't need to hit the image itself. ZeroSlop picks the photo or video nearest to where you clicked, prefers the post's own media over a quoted post's, and briefly outlines the one it's checking.
+- **Fast AI-image detector.** The Community Forensics ViT (87 MB, MIT licence) scores how likely an image is AI-generated, usually in under a second, on WebGPU or the CPU. It downloads automatically on the first check. Videos are scored from their preview image plus the frame currently showing, averaged.
+- **Results persist.** Scores are saved on this computer (up to 500) and re-applied when posts scroll back into view, including after a refresh.
+- **Community image registry.** Scores, never images, are added to a new `image_registry` collection with a check count and running average. Posts with an average of 50% or more get a label for everyone as they scroll. Votes (👍/👎) work like text scores, and heavily downvoted scores are hidden.
+- **Explain why with Gemma 4.** Optional, from the result card. Gemma 4 E2B (3.4 GB) lists the signs it sees and reads AI watermarks, and a spotted watermark updates the post's label. Download it ahead of time from the popup, where you can also remove it.
+- New **Image check** section in the popup shows the detector's status, how many images you've checked, and Gemma 4's download progress, with resume, retry and remove.
+
+### Technical
+- The model runs in an offscreen document (`offscreen.html` / `offscreen.js`), which closes after 10 idle minutes to free GPU memory.
+- transformers.js 4.3.2 and the matching ONNX Runtime WebAssembly files are bundled in `dist/vendor/`, because extensions can't load code from a CDN.
+- New `build.js`: `npm run build` copies sources and vendored files into `dist/`.
+- New permissions: `offscreen`, `unlimitedStorage`, and access to X's image CDN. The extension's content security policy now allows WebAssembly.
+- **Firestore rules:** new `image_registry` rules. Deploy with `firebase deploy --only firestore:rules`.
+- `PRIVACY.md` updated to cover image results and on-device models.
+
+---
 ## v1.5.0 (November 18, 2026)
 
 ### Calmer, clearer interface

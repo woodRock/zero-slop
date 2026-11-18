@@ -109,6 +109,10 @@
     .field-status { min-height: 18px; font-size: 12.5px; margin-top: 6px; color: var(--muted); }
     .field-status.ok { color: var(--green); }
     .field-status.err { color: var(--red); }
+    .model-row { padding: 8px 0; }
+    .model-row + .model-row { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 12px; }
+    .meter { height: 6px; border-radius: 999px; background: var(--surface); overflow: hidden; margin-top: 8px; }
+    .meter span { display: block; height: 100%; width: 0; background: var(--accent); border-radius: inherit; transition: width .3s ease; }
     .callout { font-size: 12.5px; color: var(--muted); background: var(--surface); border-radius: 10px; padding: 10px 12px; margin: 0 0 8px; }
     .callout kbd { font: inherit; font-weight: 700; color: var(--fg); }
 
@@ -225,6 +229,31 @@
             </span>
             <span class="switch"><input type="checkbox" id="autoScanToggle"><span class="track"></span></span>
           </label>
+        </div>
+      </details>
+
+      <details class="section" id="imageCheck">
+        <summary><h2 class="section-title">Image check (on device)</h2><span class="summary-meta" id="detectorBadge">Ready on first use</span></summary>
+        <div class="body">
+          <p class="callout">Right-click any post with a photo or video and choose <kbd>ZeroSlop → Check this post’s image or video</kbd>. Images are checked on your computer; only the score is shared with the community registry.</p>
+
+          <div class="model-row">
+            <div class="setting-name">Quick check</div>
+            <p class="hint" id="detectorStatus">An AI-image detector (87 MB) downloads automatically the first time you check an image.</p>
+            <p class="hint" id="savedResults"></p>
+          </div>
+
+          <div class="model-row">
+            <div class="setting-name">Explain with Gemma 4 <span class="tag" id="imageModelBadge">Not downloaded</span></div>
+            <p class="hint">Optional. Describes the signs it sees, like hands, garbled text or watermarks. Slower, and needs WebGPU.</p>
+            <p class="hint" id="imageModelStatus" role="status" aria-live="polite"></p>
+            <div class="meter" id="modelProgress" role="progressbar" aria-label="Gemma 4 download" aria-valuemin="0" aria-valuemax="100" hidden><span></span></div>
+            <p class="hint" id="webgpuHint" hidden></p>
+            <div class="row" style="margin-top: 10px;">
+              <button type="button" class="btn btn-primary" id="downloadModelBtn">Download Gemma 4 (3.4 GB)</button>
+              <button type="button" class="btn btn-danger" id="removeModelBtn" hidden>Remove Gemma 4</button>
+            </div>
+          </div>
         </div>
       </details>
 

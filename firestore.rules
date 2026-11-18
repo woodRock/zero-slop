@@ -23,6 +23,21 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Image Registry: on-device AI-image detector scores, keyed by the image's path on X's CDN.
+    // Scores come from users' browsers, so they're a community hint, not proof.
+    match /image_registry/{mediaId} {
+      allow read: if true;
+      allow create, update: if
+        request.resource.data.media_id == mediaId &&
+        request.resource.data.ai_score is number &&
+        request.resource.data.ai_score >= 0 && request.resource.data.ai_score <= 100 &&
+        (!('checks' in request.resource.data) || request.resource.data.checks >= 0) &&
+        (!('score_sum' in request.resource.data) || request.resource.data.score_sum >= 0) &&
+        (!('upvotes' in request.resource.data) || request.resource.data.upvotes >= 0) &&
+        (!('downvotes' in request.resource.data) || request.resource.data.downvotes >= 0);
+      allow delete: if false;
+    }
+
     // Suspicious Accounts: Track retweeters of slop
     match /suspicious_accounts/{accountId} {
       allow read: if true;

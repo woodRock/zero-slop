@@ -233,6 +233,145 @@ document.addEventListener('DOMContentLoaded', () => {
     clearBtn.textContent = 'Clear history';
   }
 
+  // ---- On-device image model ----
+  const MODEL_CACHES = ['transformers-cache', 'experimental_transformers-hash-cache'];
+  const MODEL_SIZE = '3.4 GB';
+  const STALE_MS = 60 * 1000; // No progress for a minute means the download stopped (e.g. browser restart).
+  const downloadModelBtn = $('downloadModelBtn');
+  const removeModelBtn = $('removeModelBtn');
+  const progressEl = $('modelProgress');
+  let hasWebGpu = true;
+  let removing = false;
+
+  const gbText = (bytes) => `${(bytes / 1e9).toFixed(1)} GB`;
+
+  async function renderImageModel() {
+    const { imageModelReady, imageModelConsent, imageModelDownload: dl, detectorReady, imageCheckCache } =
+      await chrome.storage.local.get(['imageModelReady', 'imageModelConsent', 'imageModelDownload', 'detectorReady', 'imageCheckCache']);
+
+    $('detectorBadge').textContent = detectorReady ? 'Ready' : 'Ready on first use';
+    $('detectorStatus').textContent = detectorReady
+      ? 'The AI-image detector is downloaded. Checks usually take under a second.'
+      : 'An AI-image detector (87 MB) downloads automatically the first time you check an image.';
+    const saved = Object.keys(imageCheckCache || {}).length;
+    $('savedResults').textContent = saved
+      ? `${saved} ${saved === 1 ? 'image' : 'images'} checked on this computer. Their labels come back when you revisit the posts.`
+      : '';
+    const active = dl && ['starting', 'downloading', 'loading'].includes(dl.stage) && Date.now() - (dl.updatedAt || 0) < STALE_MS;
+
+    let badge;
+    let status;
+    let showBar = false;
+    let downloadLabel = `Download Gemma 4 (${MODEL_SIZE})`;
+    let showDownload = true;
+    let showRemove = false;
+
+    if (active) {
+      const pct = Math.max(0, Math.min(100, Math.round(dl.progress || 0)));
+      showBar = dl.stage !== 'starting';
+      progressEl.firstElementChild.style.width = `${pct}%`;
+      progressEl.setAttribute('aria-valuenow', String(pct));
+      showDownload = false;
+      if (dl.stage === 'downloading') {
+        badge = `Downloading ${pct}%`;
+        status = `${pct}%${dl.total ? ` · ${gbText(dl.loaded)} of ${gbText(dl.total)}` : ''}. You can close this popup; the download keeps going.`;
+      } else if (dl.stage === 'loading') {
+        badge = 'Loading';
+        status = 'Loading the model onto your GPU…';
+      } else {
+        badge = 'Starting';
+        status = 'Starting the download…';
+      }
+    } else if (dl && dl.stage === 'error') {
+      badge = 'Download failed';
+      status = dl.code === 'no-webgpu'
+        ? 'This browser can’t run the model because WebGPU isn’t available.'
+        : `The download didn’t finish: ${dl.message || 'unknown error'}.`;
+      downloadLabel = 'Try again';
+      showRemove = true;
+    } else if (imageModelReady) {
+      badge = 'Ready';
+      status = 'Downloaded and ready. Use “Explain why” on any image check result.';
+      showDownload = false;
+      showRemove = true;
+    } else {
+      // The detector shares the cache, so total cache size can't tell us about Gemma; use the download record.
+      if (imageModelConsent || dl) {
+        badge = 'Partly downloaded';
+        status = 'The download stopped before finishing. Resuming keeps what was already downloaded.';
+        downloadLabel = 'Resume download';
+        showRemove = true;
+      } else {
+        badge = 'Not downloaded';
+        status = `Download it now, or from “Explain why” on a result.`;
+      }
+    }
+
+    $('imageModelBadge').textContent = badge;
+    $('imageModelStatus').textContent = status;
+    progressEl.hidden = !showBar;
+    downloadModelBtn.textContent = downloadLabel;
+    downloadModelBtn.hidden = !showDownload;
+    downloadModelBtn.disabled = !hasWebGpu;
+    if (!removing) removeModelBtn.hidden = !showRemove;
+    // Keep the section open while something is happening, so progress is visible.
+    if (active) $('imageCheck').open = true;
+  }
+
+  (async () => {
+    let adapter = null;
+    try { adapter = navigator.gpu ? await navigator.gpu.requestAdapter() : null; } catch (e) {}
+    hasWebGpu = !!adapter;
+    const hint = $('webgpuHint');
+    hint.hidden = hasWebGpu;
+    hint.textContent = hasWebGpu ? '' : 'This browser doesn’t support WebGPU, so the image check can’t run here.';
+    renderImageModel();
+  })();
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && (changes.imageModelDownload || changes.imageModelReady || changes.imageModelConsent || changes.detectorReady || changes.imageCheckCache)) renderImageModel();
+  });
+
+  downloadModelBtn.addEventListener('click', () => {
+    downloadModelBtn.disabled = true;
+    chrome.runtime.sendMessage({ action: 'downloadImageModel' });
+  });
+
+  let removeTimer = null;
+  removeModelBtn.addEventListener('click', async () => {
+    if (!removeModelBtn.classList.contains('confirming')) {
+      removeModelBtn.classList.add('confirming');
+      removeModelBtn.textContent = 'Click again to remove';
+      removeTimer = setTimeout(resetRemove, 3000);
+      return;
+    }
+    resetRemove();
+    removing = true;
+    removeModelBtn.disabled = true;
+    removeModelBtn.textContent = 'Removing…';
+    chrome.runtime.sendMessage({ action: 'removeImageModel' });
+    // Delete only Gemma's files; the small detector shares the same cache and stays.
+    await Promise.all(MODEL_CACHES.map(async (name) => {
+      try {
+        const cache = await caches.open(name);
+        const keys = await cache.keys();
+        await Promise.all(keys.filter((req) => /gemma-4/i.test(req.url)).map((req) => cache.delete(req)));
+      } catch (e) {}
+    }));
+    await chrome.storage.local.set({ imageModelReady: false, imageModelConsent: false });
+    await chrome.storage.local.remove('imageModelDownload');
+    removing = false;
+    removeModelBtn.disabled = false;
+    removeModelBtn.textContent = 'Remove Gemma 4';
+    await renderImageModel();
+    $('imageModelStatus').textContent = 'Gemma 4 removed. You can download it again any time.';
+  });
+  function resetRemove() {
+    clearTimeout(removeTimer);
+    removeModelBtn.classList.remove('confirming');
+    removeModelBtn.textContent = 'Remove Gemma 4';
+  }
+
   exportBtn.addEventListener('click', () => {
     chrome.storage.local.get(['scanHistory'], (result) => {
       const history = result.scanHistory || [];
