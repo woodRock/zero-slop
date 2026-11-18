@@ -475,14 +475,14 @@ function App() {
           </div>
         </section>
         <section id="installation">
-          <Tweet media={{ type: 'image', src: `${baseUrl}zero-slop-result.png` }}>
+          <Tweet media={{ type: 'image', src: `${baseUrl}zero-slop-result.jpg` }}>
             <h2>Get ZeroSlop</h2><p>Ready to clean up your feed? Add ZeroSlop to your browser and join the community registry.</p>
             <div style={{ margin: '20px 0' }}><a href="https://chromewebstore.google.com/detail/enlimjkhkfbhcoebopkklafhakhehiab?utm_source=item-share-cb" target="_blank" className="btn-inline" style={{ fontWeight: 'bold', padding: '12px 24px', backgroundColor: '#1d9bf0', color: 'white', borderRadius: '30px', textDecoration: 'none', fontSize: '1.1rem' }}>Add to Chrome</a></div>
             <div style={{ borderTop: '1px solid #2f3336', paddingTop: '15px', marginTop: '20px' }}><h3>Optional: Configuration</h3><p>To perform new scans, add your own <strong>ZeroGPT Business API Key</strong> in the extension popup. Previous scans are free for everyone.</p></div>
           </Tweet>
         </section>
         <section id="taxonomy"><div style={{ margin: '20px 0' }}><FieldGuide /></div></section>
-        <section id="features"><Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-usage-video.mov` }}><h2>Features & Usage</h2><p>Seamlessly integrated into your X timeline. Right-click any tweet to analyze it, or scan entire threads and profiles with one click.</p><div className="browser-icons"><span>Supports: Chrome, Edge, Brave</span></div></Tweet></section>
+        <section id="features"><Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-usage-video.mp4` }}><h2>Features & Usage</h2><p>Every post and profile on X gets a ZeroSlop button. Open it to check the post's text, its photos and videos, the whole thread, or the account, then tag it as slop or human in one tap.</p><div className="browser-icons"><span>Supports: Chrome, Edge, Brave</span></div></Tweet></section>
         <section id="how-it-works"><Tweet media={{ type: 'image', src: `${baseUrl}architecture-diagram.jpeg` }}><h2>How it Works</h2><p>ZeroSlop combines cutting-edge AI detection with community-driven reporting. When you scan a tweet, our engine analyzes it and saves the result to a shared registry for everyone to see. 🧠⚡</p></Tweet></section>
         <section id="registry"><Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-self-reporting.mov` }}><h2>Community Registry</h2><p>ZeroSlop is powered by decentralized intelligence. When one user scans a tweet, the result is saved for everyone. Watch it happen live! 🛡️🤝</p></Tweet></section>
         <section id="research-data">
@@ -580,7 +580,7 @@ function App() {
             </div>
           </Tweet>
         </section>
-        <section id="wanted"><Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-wanted-posters.mov` }}><h2>Wanted Posters</h2><p>Expose the slop-posters with style! Generate a custom "WANTED" poster for any AI-detected tweet and share it instantly. 🖼️🎨</p></Tweet></section>
+        <section id="wanted"><Tweet media={{ type: 'video', src: `${baseUrl}zero-slop-wanted-posters.mp4` }}><h2>Wanted Posters</h2><p>Expose the slop-posters with style! Check a post, then copy a "WANTED" poster stamped with its AI score straight from the ZeroSlop panel and share it. 🖼️🎨</p></Tweet></section>
         <section id="faq"><div className="faq-container"><h2>Frequently Asked Questions</h2><div className="faq-item"><h3>Does this cost money?</h3><p>The extension is free. However, performing new scans uses the ZeroGPT API which requires your own API key with credits. Community detections are free to view.</p></div><div className="faq-item"><h3>Is it 100% accurate?</h3><p>AI detection is probabilistic. ZeroSlop identifies strong markers of AI generation and industrial engagement farming.</p></div></div></section>
         <section id="privacy"><Tweet><h2>Privacy Policy</h2><p>ZeroSlop is built with a privacy-first mindset. No personal data is stored. All processing happens between your browser and the ZeroGPT API.</p><a href="https://github.com/woodrock/zero-slop/blob/main/PRIVACY.md" target="_blank" className="btn-inline">Read full policy →</a></Tweet></section>
         <footer style={{ padding: '40px', textAlign: 'center', color: '#71767b', borderTop: '1px solid #2f3336' }}><p>&copy; {year} ZeroSlop. Built for a cleaner timeline.</p></footer>
