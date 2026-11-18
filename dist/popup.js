@@ -6,11 +6,12 @@ document.addEventListener('DOMContentLoaded', () => {
     hunterVision: $('hunterVisionToggle'),
     autoHumanDetection: $('autoHumanDetectionToggle'),
     profileAlerts: $('profileAlertsToggle'),
+    postButton: $('postButtonToggle'),
     autoScan: $('autoScanToggle'),
     adminOrganicCollection: $('adminOrganicToggle')
   };
   // Settings that are on unless the user turned them off.
-  const DEFAULT_ON = ['communityShield', 'profileAlerts'];
+  const DEFAULT_ON = ['communityShield', 'profileAlerts', 'postButton'];
 
   const ACTION_HINTS = {
     none: 'Flagged posts get a label but stay fully visible.',
@@ -146,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     chrome.storage.local.set({ zerogptApiKey: apiKey }, () => {
       setKeyState(true);
-      showKeyStatus('Saved. Right-click any post to run a deep scan.', 'ok');
+      showKeyStatus('Saved. Check now uses ZeroGPT for post text.', 'ok');
     });
   }
   $('saveBtn').addEventListener('click', saveKey);
@@ -184,7 +185,7 @@ document.addEventListener('DOMContentLoaded', () => {
       li.className = 'empty';
       const title = document.createElement('strong');
       title.textContent = 'No scans yet';
-      li.append(title, 'Right-click a post on X and choose ZeroSlop → Check with ZeroGPT. Results will show up here.');
+      li.append(title, 'Click the bot button on a post and choose Check. ZeroGPT text scores show up here.');
       historyList.appendChild(li);
       return;
     }

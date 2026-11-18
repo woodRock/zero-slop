@@ -4,141 +4,22 @@ const FIREBASE_CONFIG = {
   projectId: "zero-slop"
 };
 
-// Initialize context menu
+// Initialize context menu: one item that opens the ZeroSlop panel for whatever was right-clicked.
+// The panel itself works out whether that's a post, thread, image, video or profile.
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
-    // Parent Menu
     chrome.contextMenus.create({
-      id: "zeroSlopParent",
-      title: "ZeroSlop",
+      id: "zeroSlopOpen",
+      title: "ZeroSlop…",
       contexts: ["all"],
       documentUrlPatterns: ["*://*.twitter.com/*", "*://*.x.com/*"]
     });
-
-    // Sub-item: Check Single
-    chrome.contextMenus.create({
-      id: "checkZeroGPT",
-      parentId: "zeroSlopParent",
-      title: "Check with ZeroGPT",
-      contexts: ["all"]
-    });
-
-    // Sub-item: Check Image (on-device model). Shown anywhere on the page, because X covers
-    // images with overlays, so right-clicking a photo rarely counts as an "image" click.
-    chrome.contextMenus.create({
-      id: "checkImage",
-      parentId: "zeroSlopParent",
-      title: "🖼️ Check this post’s image or video",
-      contexts: ["all"]
-    });
-
-    // Sub-item: Check Thread
-    chrome.contextMenus.create({
-      id: "checkThread",
-      parentId: "zeroSlopParent",
-      title: "🧵 Scan This Thread",
-      contexts: ["all"]
-    });
-
-    // Sub-item: Check Profile
-    chrome.contextMenus.create({
-      id: "checkProfile",
-      parentId: "zeroSlopParent",
-      title: "👤 Scan User Profile",
-      contexts: ["all"]
-    });
-
-    // Sub-item: Report Account
-    chrome.contextMenus.create({
-      id: "reportAccount",
-      parentId: "zeroSlopParent",
-      title: "🚩 Mark as Slop Factory",
-      contexts: ["all"]
-    });
-
-    // Sub-item: Report Slop
-    chrome.contextMenus.create({
-      id: "reportSlop",
-      parentId: "zeroSlopParent",
-      title: "🚩 Report as AI Slop",
-      contexts: ["all"]
-    });
-
-    console.log("ZeroSlop: Context menus initialized.");
   });
 });
 
-// Handle context menu click
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === "checkZeroGPT") {
-    const textToCheck = info.selectionText;
-    if (textToCheck) {
-      performDetection(textToCheck, tab.id);
-    } else {
-      chrome.tabs.sendMessage(tab.id, { action: "getTweetText" }, (response) => {
-        if (response && response.text) {
-          performDetection(response.text, tab.id, response.tweetId, false, response.author);
-        }
-      });
-    }
-  } else if (info.menuItemId === "checkImage") {
-    chrome.tabs.sendMessage(tab.id, { action: "getMediaInfo", srcUrl: info.srcUrl || null }, (media) => {
-      if (chrome.runtime.lastError) return;
-      requestImageDetect(tab.id, media);
-    });
-  } else if (info.menuItemId === "checkThread") {
-    chrome.tabs.sendMessage(tab.id, { action: "getThreadText" }, (response) => {
-      if (response && response.text) {
-        performDetection(response.text, tab.id, response.tweetId, false, response.author, true);
-      }
-    });
-  } else if (info.menuItemId === "checkProfile") {
-    chrome.tabs.sendMessage(tab.id, { action: "getProfileText" }, (response) => {
-      if (response && response.text) {
-        performDetection(response.text, tab.id, null, false, response.author, true);
-      }
-    });
-  } else if (info.menuItemId === "reportSlop") {
-    chrome.tabs.sendMessage(tab.id, { action: "getTweetText" }, (response) => {
-      if (response && response.tweetId) {
-        storeSlopTweet(response.tweetId, response.text, 0, response.author, true);
-        chrome.tabs.sendMessage(tab.id, { 
-          action: "showResult", 
-          data: { feedback_message: "Reported to ZeroSlop Registry" },
-          isAutoScan: false
-        });
-
-        // Automated Amplifier Scan: Mark existing retweeters/quote-tweeters as suspicious
-        scanAmplifiers(response.tweetId);
-      }
-    });
-  }
-  else if (info.menuItemId === "reportAccount") {
-    chrome.tabs.sendMessage(tab.id, { action: "getProfileText" }, (response) => {
-      if (response && response.author && response.author.handle) {
-        storeSlopFactoryReport(response.author);
-        chrome.tabs.sendMessage(tab.id, { 
-          action: "showResult", 
-          data: { feedback_message: `Marked ${response.author.handle} as Potential Slop Factory` },
-          isAutoScan: false
-        });
-        
-        // Immediately show the warning banner and badges
-        chrome.tabs.sendMessage(tab.id, {
-          action: "showSlopFactoryWarning",
-          handle: response.author.handle
-        });
-
-        // If we have a tweetId from the context of where they clicked, scan its amplifiers too
-        chrome.tabs.sendMessage(tab.id, { action: "getTweetText" }, (tweetResponse) => {
-          if (tweetResponse && tweetResponse.tweetId) {
-            scanAmplifiers(tweetResponse.tweetId);
-            // Also store this tweet as 100% manual slop since the author is a factory
-            storeSlopTweet(tweetResponse.tweetId, tweetResponse.text, 100, response.author, true);
-          }
-        });
-      }
-    });
+  if (info.menuItemId === "zeroSlopOpen") {
+    chrome.tabs.sendMessage(tab.id, { action: "openPanelFromMenu", srcUrl: info.srcUrl || null }).catch(() => {});
   }
 });
 
@@ -168,12 +49,12 @@ function validMediaId(id) {
   return typeof id === "string" && /^[A-Za-z0-9_.-]{3,300}$/.test(id) && id !== "." && id !== "..";
 }
 
-async function requestImageDetect(tabId, media) {
+async function requestImageDetect(tabId, media, panelRequestId = null) {
   if (!media || !media.url || !validMediaId(media.mediaId)) {
-    chrome.tabs.sendMessage(tabId, { action: "imageCheckError", mode: "detect", code: "no-image", message: "No photo or video was found in that post." });
+    chrome.tabs.sendMessage(tabId, { action: "imageCheckError", mode: "detect", requestId: panelRequestId, code: "no-image", message: "No photo or video was found in that post." });
     return;
   }
-  const requestId = crypto.randomUUID();
+  const requestId = panelRequestId || crypto.randomUUID();
   const { detectorReady } = await chrome.storage.local.get(["detectorReady"]);
   chrome.tabs.sendMessage(tabId, { action: "imageCheckStatus", mode: "detect", requestId, tweetId: media.tweetId || null, stage: detectorReady ? "analyzing" : "starting", size: DETECTOR_SIZE });
   try {
@@ -198,6 +79,8 @@ function parseImageDoc(doc) {
     avg: checks ? Math.round(num(f.score_sum) / checks) : Math.round(num(f.ai_score)),
     upvotes: num(f.upvotes),
     downvotes: num(f.downvotes),
+    markedSlop: num(f.marked_slop),
+    markedNotSlop: num(f.marked_not_slop),
     kind: f.kind?.stringValue || "image",
     model: f.model?.stringValue || ""
   };
@@ -415,6 +298,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.storage.local.remove("imageModelDownload");
     return;
   }
+  if (msg?.action === "detectMedia" && sender.tab) {
+    requestImageDetect(sender.tab.id, msg.media, msg.requestId);
+    return;
+  }
+  if (msg?.action === "zerogptScore") {
+    scoreTextWithZeroGPT(msg.text || "", { tweetId: msg.tweetId, author: msg.author }).then(sendResponse);
+    return true;
+  }
+  if (msg?.action === "queueSlopActions" && sender.tab) {
+    queueSlopActions(msg.batchId, msg.actions || [], sender.tab.id);
+    return;
+  }
+  if (msg?.action === "cancelSlopActions") {
+    sendResponse({ cancelled: cancelSlopActions(msg.batchId) });
+    return true;
+  }
   if (msg?.action === "checkImageRegistry") {
     getImageRegistry(msg.mediaIds || []).then((entries) => sendResponse(entries)).catch(() => sendResponse({}));
     return true;
@@ -432,6 +331,94 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
 });
+
+function handleManualReport(request, tabId) {
+  const score = request.aiScore || 0;
+  // Account-only reports have no post to store.
+  if (request.tweetId && !String(request.tweetId).startsWith('local-')) {
+    storeSlopTweet(request.tweetId, request.text, score, request.author, true, request.slopType, request.extractionResults);
+  }
+
+  if (request.shieldType && request.author) {
+    storeSlopFactoryReport(request.author, request.shieldType);
+
+    const action = SHIELD_ACTIONS[request.shieldType.replace('shield-', '')];
+    if (action && tabId) {
+      chrome.tabs.sendMessage(tabId, {
+        action: action,
+        handle: request.author.handle
+      }).catch(() => {});
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// "Is this slop?" answers from the panel, sent after a short undo window
+// ---------------------------------------------------------------------------
+
+const UNDO_WINDOW_MS = 5000;
+const pendingSlopActions = new Map(); // batchId -> timer
+
+function queueSlopActions(batchId, actions, tabId) {
+  clearTimeout(pendingSlopActions.get(batchId));
+  pendingSlopActions.set(batchId, setTimeout(() => {
+    pendingSlopActions.delete(batchId);
+    for (const a of actions) runSlopAction(a, tabId);
+  }, UNDO_WINDOW_MS));
+}
+
+function cancelSlopActions(batchId) {
+  clearTimeout(pendingSlopActions.get(batchId));
+  return pendingSlopActions.delete(batchId);
+}
+
+function runSlopAction(a, tabId) {
+  switch (a.type) {
+    case "reportPost":
+      handleManualReport({ ...a, action: "manualReport" }, tabId);
+      if (a.findAmplifiers && a.tweetId) scanAmplifiers(a.tweetId);
+      break;
+    case "votePost":
+      voteSlopTweet(a.tweetId, a.voteType);
+      break;
+    case "reportAccount":
+      handleManualReport({ tweetId: null, author: a.author, shieldType: a.shieldType }, tabId);
+      break;
+    case "voteAccount":
+      voteSlopAccount(a.handle, a.voteType);
+      break;
+    case "markImage":
+      markImage(a);
+      break;
+  }
+}
+
+/** Record a person's "slop / not slop" answer on an image, alongside its detector score. */
+async function markImage({ mediaId, url, kind, score, tweetId, author, verdict }) {
+  if (!validMediaId(mediaId) || typeof score !== "number") return;
+  const fields = {
+    media_id: { stringValue: mediaId },
+    media_url: { stringValue: url || "" },
+    kind: { stringValue: kind || "image" },
+    ai_score: { doubleValue: score },
+    last_marked: { timestampValue: new Date().toISOString() }
+  };
+  if (tweetId) fields.tweet_id = { stringValue: tweetId };
+  if (author) fields.author_handle = { stringValue: author };
+  const name = firestoreDoc(`image_registry/${mediaId}`);
+  const body = {
+    writes: [
+      { update: { name, fields }, updateMask: { fieldPaths: Object.keys(fields) } },
+      { transform: { document: name, fieldTransforms: [{ fieldPath: verdict === "slop" ? "marked_slop" : "marked_not_slop", increment: { integerValue: 1 } }] } }
+    ]
+  };
+  try {
+    await fetch(firestoreUrl("documents:commit"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    imageRegistryCache.delete(mediaId);
+  } catch (e) {
+    console.error("ZeroSlop: Image mark failed", e);
+  }
+}
 
 // Account shield type -> content-script message that labels the account
 const SHIELD_ACTIONS = {
@@ -475,20 +462,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       chrome.tabs.remove(sender.tab.id);
     }
   } else if (request.action === "manualReport") {
-    const score = request.aiScore || 0;
-    storeSlopTweet(request.tweetId, request.text, score, request.author, true, request.slopType, request.extractionResults);
-
-    if (request.shieldType && request.author) {
-      storeSlopFactoryReport(request.author, request.shieldType);
-
-      const action = SHIELD_ACTIONS[request.shieldType.replace('shield-', '')];
-      if (action) {
-        chrome.tabs.sendMessage(sender.tab.id, {
-          action: action,
-          handle: request.author.handle
-        });
-      }
-    }
+    handleManualReport(request, sender.tab?.id);
   } else if (request.action === "voteSlop") {
     voteSlopTweet(request.tweetId, request.voteType);
   } else if (request.action === "voteAccount") {
@@ -742,6 +716,36 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
     }
   } catch (e) {
     console.error("ZeroSlop: Error reporting slop factory (atomic)", e);
+  }
+}
+
+/**
+ * Score text with ZeroGPT for the panel. Returns { score, words } or { error }.
+ * Like the old right-click scan, results go to the scan history and the registry.
+ */
+async function scoreTextWithZeroGPT(text, { tweetId = null, author = null } = {}) {
+  const { zerogptApiKey } = await chrome.storage.local.get(['zerogptApiKey']);
+  if (!zerogptApiKey) return { error: "no-key" };
+  try {
+    const response = await fetch("https://api.zerogpt.com/api/detect/detectText", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "ApiKey": zerogptApiKey },
+      body: JSON.stringify({ input_text: text })
+    });
+    if (!response.ok) return { error: "failed", status: response.status };
+    const result = await response.json();
+    if (!result.success) return { error: "failed" };
+    const score = Math.round(result.data.fakePercentage || 0);
+    saveToHistory(text, score, result.data.textWords);
+    if (score > 15) {
+      incrementSlopsCaught();
+      updateGlobalStats('total_slops');
+    }
+    if (tweetId) storeSlopTweet(tweetId, text, score, author, false);
+    return { score, words: result.data.textWords || 0 };
+  } catch (e) {
+    console.error("ZeroSlop: ZeroGPT request failed", e);
+    return { error: "failed" };
   }
 }
 
