@@ -18,8 +18,14 @@ ZeroSlop goes beyond binary AI detection. We categorize accounts based on their 
 - **Heuristic Highlighting**: Real-time, local scanning that highlights "Extraction Hooks" (Thread 🧵, "Save for later," "$0 to $10k") in red ink directly on your timeline.
 - **Precision Reporting**: A multi-dimensional reporting drawer that lets you categorize slop types and perform the "Extraction Test" (Accountability, Funnel, Replicability).
 
+### 🤖 One Button for Everything
+- Every post and profile gets a small bot button (or right-click and choose **ZeroSlop…**). It opens one panel that works out what you're looking at: a post, its photos or videos, a thread, or an account.
+- **Check** runs the right scan: the free on-device text model (or ZeroGPT with your key) for text, the AI-image detector for photos and videos, all posts in a thread, or an account's registry history and posts on screen.
+- **Is this slop? Yes / No.** Scans can be wrong, so you always make the call, with or without checking first, and you have 5 seconds to undo. Optional details: tactic, extraction test, flag the account, find amplifiers.
+- Your answers are saved, so posts keep a "You: slop" label after a refresh. On content that's already labelled, your answer also counts as a vote.
+
 ### 🖼️ On-device Image Check
-- Right-click any post with a photo or video and choose **ZeroSlop → Check this post’s image or video**. ZeroSlop picks the media nearest to where you clicked.
+- Open the ZeroSlop panel on any post with a photo or video and choose **Check**.
 - **Quick check:** the [Community Forensics](https://huggingface.co/buildborderless/CommunityForensics-DeepfakeDet-ViT) detector (87 MB, trained on images from 4,800+ generators) gives a score for how likely the image is AI-generated, usually in under a second. It runs on your computer (WebGPU, or the CPU if WebGPU isn't available), and the image is never uploaded. Videos are scored using their preview image plus the frame currently showing.
 - **Saved and shared:** results are saved on your computer, so labels come back when you revisit a post. Scores (not images) go to the community registry, so other users see a label on likely-AI media (50%+) as they scroll. Anyone can vote on whether a score looks right.
 - **Explain why (optional):** Gemma 4 E2B (3.4 GB, downloadable from the popup) describes the signs it sees and reads AI watermarks. Its explanations stay on your device.

@@ -35,18 +35,21 @@ const zsSettings = {
   autoScan: false,
   adminOrganicCollection: false,
   profileAlerts: true,
+  postButton: true,
   slopAction: 'blur',
   hideThreshold: 85
 };
 
 let zsImageCache = {}; // mediaId -> this computer's image check result (saved by the background script)
+let zsUserMarks = {}; // tweetId or "acct:handle" -> { verdict: 'slop' | 'not_slop', at }, the person's own answers
 
 const zsSettingsReady = new Promise((resolve) => {
-  chrome.storage.local.get([...Object.keys(zsSettings), 'imageCheckCache'], (stored) => {
+  chrome.storage.local.get([...Object.keys(zsSettings), 'imageCheckCache', 'userMarks'], (stored) => {
     for (const key of Object.keys(zsSettings)) {
       if (stored[key] !== undefined) zsSettings[key] = stored[key];
     }
     zsImageCache = stored.imageCheckCache || {};
+    zsUserMarks = stored.userMarks || {};
     resolve();
   });
 });
@@ -189,6 +192,43 @@ const ZS_STYLES = `
   .zs-confirm { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; font-weight: 600;
     color: var(--zs-green); background: color-mix(in srgb, var(--zs-green) 12%, transparent); }
   .zs-loading { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+  /* Bot button in each post's action row (and on profiles) */
+  .zs-action-wrap { display: flex; align-items: center; justify-content: flex-end; }
+  .zs-action-wrap.zs-action-inline { display: inline-flex; margin-left: 4px; vertical-align: middle; }
+  .zs-action-btn {
+    all: unset; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-width: 34px; height: 34px; padding: 0 8px; border-radius: 999px; cursor: pointer;
+    color: var(--zs-muted); font: 700 13px var(--zs-font); transition: color .15s ease, background-color .15s ease;
+  }
+  .zs-action-inline .zs-action-btn { min-width: 26px; height: 26px; padding: 0 4px; }
+  .zs-action-btn:hover { color: var(--zs-accent); background: color-mix(in srgb, var(--zs-accent) 12%, transparent); }
+  .zs-action-btn:focus-visible { outline: 2px solid var(--zs-accent); outline-offset: 1px; }
+  .zs-profile-btn { border: 1px solid var(--zs-border); color: var(--zs-fg); margin-top: 8px; padding: 0 12px; }
+
+  /* Panel */
+  .zs-panel { position: fixed; z-index: 2147483646; width: 340px; max-height: calc(100vh - 24px); overflow-y: auto; padding: 14px 16px 12px; animation: zsFade .12s ease-out; }
+  .zs-panel .zs-title { margin: 0 0 10px; }
+  .zs-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; margin: 0 0 10px; background: var(--zs-surface); border-radius: 10px; }
+  .zs-seg button { all: unset; text-align: center; padding: 6px 4px; border-radius: 7px; cursor: pointer; font: 600 13px var(--zs-font); color: var(--zs-muted); }
+  .zs-seg button.zs-seg-on { background: var(--zs-bg); color: var(--zs-fg); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+  .zs-seg button:focus-visible { outline: 2px solid var(--zs-accent); }
+  .zs-known { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .zs-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+    color: var(--zs-tone); background: color-mix(in srgb, var(--zs-tone) 12%, transparent); }
+  .zs-results { margin-top: 8px; }
+  .zs-result-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--zs-border); font-size: 13.5px; }
+  .zs-row-label { font-weight: 600; }
+  .zs-row-detail { font-size: 12px; color: var(--zs-muted); }
+  .zs-row-score { font-weight: 800; color: var(--zs-tone); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .zs-row-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--zs-muted); white-space: nowrap; }
+  .zs-spinner-sm { width: 14px; height: 14px; }
+  .zs-link-btn { all: unset; cursor: pointer; color: var(--zs-accent); font: 600 12.5px var(--zs-font); margin-top: 2px; display: inline-block; }
+  .zs-link-btn:hover { text-decoration: underline; }
+  .zs-link-btn:focus-visible { outline: 2px solid var(--zs-accent); border-radius: 4px; }
+  .zs-question { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--zs-border); }
+  .zs-question-title { font-weight: 800; font-size: 15px; margin-bottom: 8px; }
+  .zs-panel-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 12.5px; }
+
   .zs-media-picked { outline: 3px solid var(--zs-accent) !important; outline-offset: -3px; transition: outline-color .3s ease; }
   .zs-signs { margin: 10px 0 0; padding-left: 18px; font-size: 13px; }
   .zs-signs li { margin: 3px 0; }
@@ -512,10 +552,12 @@ function togglePopover(badge) {
 
 document.addEventListener('pointerdown', (e) => {
   if (zsPopover && !zsPopover.contains(e.target) && !zsPopover._anchor.contains(e.target)) closePopover();
+  if (zsPanel && !zsPanel.el.contains(e.target) && !(zsPanel.anchor && zsPanel.anchor.contains && zsPanel.anchor.contains(e.target))) closePanel();
 }, true);
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (zsPopover) { closePopover({ restoreFocus: true }); return; }
+  if (zsPanel) { closePanel({ restoreFocus: true }); return; }
   closeResultCard();
 });
 window.addEventListener('scroll', (e) => {
@@ -623,6 +665,7 @@ function showProfileNotice(kind, handle, { title, text, actions = [] }) {
 
 function clearPageUi() {
   closePopover();
+  if (typeof closePanel === 'function') closePanel();
   document.querySelectorAll('.zs-toast[data-notice]').forEach((n) => n.remove());
   document.querySelectorAll('.zs-header-badge').forEach((b) => b.remove());
   shownNotices.clear();
@@ -634,6 +677,8 @@ function clearPageUi() {
 
 function applyAccountStatus(kind, handle, extra = {}) {
   if (!handle) return;
+  const prev = zsAccountStatus.get(normHandle(handle));
+  if (!prev || (BADGE_KINDS[kind]?.priority || 0) >= (BADGE_KINDS[prev]?.priority || 0)) zsAccountStatus.set(normHandle(handle), kind);
 
   tweetsByHandle(handle).forEach((article) => {
     let spec = { kind, actions: () => accountVoteActions(handle) };
@@ -734,15 +779,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse(findMediaInfo(request.srcUrl));
       break;
     case 'imageCheckStatus':
+      if (panelRequests.has(request.requestId)) { panelRequests.get(request.requestId).onStatus?.(request); break; }
       showImageCard({ state: 'progress', ...request });
       break;
     case 'imageCheckResult':
       showExplainResult(request);
       break;
     case 'imageDetectResult':
+      if (panelRequests.has(request.requestId)) {
+        const container = request.tweetId ? getTweetContainerByTweetId(request.tweetId) : null;
+        if (container) setBadge(container, imageBadgeSpec({ score: request.result.score, kind: request.kind, source: 'local', mediaId: request.mediaId }));
+        panelRequests.get(request.requestId).resolve(request.result.score);
+        break;
+      }
       showDetectResult(request);
       break;
+    case 'openPanelFromMenu':
+      openPanelFromMenu();
+      break;
     case 'imageCheckError':
+      if (panelRequests.has(request.requestId)) { panelRequests.get(request.requestId).resolve(null); break; }
       showImageCard({ state: 'error', ...request });
       break;
   }
@@ -965,7 +1021,9 @@ function zapPost(container, reason) {
 
 function scanArticle(container) {
   highlightSlopMarkers(container);
+  injectPostButton(container);
   applyStoredImageResults(container);
+  applyUserMark(container);
   const info = extractTweetInfo(container);
 
   // Layer 3: Smart Slop Guard (on-device model)
@@ -1025,6 +1083,7 @@ async function initObservers() {
     if (path.includes('/following') || path.includes('/followers') || path.includes('/verified_followers')) {
       injectListAuditorButton();
     }
+    injectProfileButton();
   };
 
   checkContext();
@@ -1054,7 +1113,13 @@ async function initObservers() {
     });
   }, { threshold: 0.1 });
 
+  let profileButtonQueued = false;
   const mutationObserver = new MutationObserver((mutations) => {
+    // The profile header renders after navigation, so retry adding its button (at most once per frame).
+    if (!profileButtonQueued && currentProfileHandle()) {
+      profileButtonQueued = true;
+      requestAnimationFrame(() => { profileButtonQueued = false; injectProfileButton(); });
+    }
     mutations.forEach((mutation) => {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType !== 1) return;
@@ -1504,7 +1569,7 @@ const UNIFIED_SLOP_RULES = [
 
 
 // ---------------------------------------------------------------------------
-// Scan result card (shown after a right-click scan)
+// Scan result card (legacy ZeroGPT result; errors such as a missing API key)
 // ---------------------------------------------------------------------------
 
 function suggestSlopType(text) {
@@ -1689,7 +1754,7 @@ function showResultCard({ state, pct = 0, words, scope = 'tweet', info, message 
 }
 
 // ---------------------------------------------------------------------------
-// On-device image check (right-click a post → ZeroSlop → Check this post’s image or video)
+// On-device image check: media lookup, detector results and Gemma explanations
 // ---------------------------------------------------------------------------
 
 const IMAGE_VERDICTS = {
@@ -1908,7 +1973,7 @@ function errorText({ code, message }) {
     return { title: 'This browser can’t run the image model', body: 'The image check needs WebGPU, which isn’t available here. Recent Chrome and Brave support it on most computers.' };
   }
   if (code === 'no-image') {
-    return { title: 'No photo or video in this post', body: 'Right-click anywhere on a post that has a photo or video, then choose ZeroSlop → Check this post’s image or video.' };
+    return { title: 'No photo or video in this post', body: 'Open the ZeroSlop panel on a post that has a photo or video, then choose Check.' };
   }
   if (code === 'image-fetch') {
     return { title: 'Couldn’t load that image', body: 'X may have removed it, or the connection dropped. Try again in a moment.' };
@@ -2154,6 +2219,613 @@ function showDetectResult({ requestId, tweetId, url, mediaId, kind, result, comm
     return;
   }
   render();
+}
+
+
+// ---------------------------------------------------------------------------
+// The ZeroSlop panel: one place to check content and say whether it's slop.
+//
+// Opened from the bot button on a post or profile, or from the right-click "ZeroSlop…" item.
+// It works out what you're looking at (post, thread, image, video or account), runs the right
+// check, and always lets the person decide. Scans inform; people mark.
+// ---------------------------------------------------------------------------
+
+const BOT_ICON = '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="8" width="16" height="11" rx="3"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1.2"/><circle cx="9" cy="13.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="13.5" r="1.3" fill="currentColor" stroke="none"/><path d="M2 12.5v3M22 12.5v3"/></svg>';
+const USER_MARK_LIMIT = 1000;
+const zsAccountStatus = new Map(); // normalized handle -> 'factory' | 'highai' | 'organic' | 'suspicious'
+const panelRequests = new Map(); // image detect requestId -> { onStatus, resolve }
+let zsPanel = null;
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.userMarks) zsUserMarks = changes.userMarks.newValue || {};
+  if (area === 'local' && changes.postButton) {
+    if (changes.postButton.newValue === false) document.querySelectorAll('.zs-action-wrap').forEach((b) => b.remove());
+    else document.querySelectorAll('article').forEach((a) => injectPostButton(a));
+  }
+});
+
+function saveUserMark(key, verdict) {
+  if (verdict) zsUserMarks[key] = { verdict, at: Date.now() };
+  else delete zsUserMarks[key];
+  const keys = Object.keys(zsUserMarks);
+  if (keys.length > USER_MARK_LIMIT) {
+    keys.sort((a, b) => zsUserMarks[a].at - zsUserMarks[b].at).slice(0, keys.length - USER_MARK_LIMIT).forEach((k) => delete zsUserMarks[k]);
+  }
+  chrome.storage.local.set({ userMarks: zsUserMarks });
+}
+
+function userMarkBadge(article, verdict) {
+  if (!article) return;
+  const existing = article.querySelector('.zs-badge[data-kind="marked"]');
+  if (!verdict) { existing?.remove(); return; }
+  const slop = verdict === 'slop';
+  setBadge(article, {
+    kind: 'marked', priority: 60, replace: true, tone: slop ? 'red' : 'green',
+    label: slop ? 'You: slop' : 'You: not slop',
+    title: slop ? 'You marked this as slop' : 'You marked this as not slop',
+    desc: 'Your answer was added to the community registry.',
+    actions: [{ label: 'Change', variant: 'secondary', onClick: () => { closePopover(); openPanelFor(article); } }]
+  });
+}
+
+/** Re-apply the person's own marks when posts scroll back into view. */
+function applyUserMark(article) {
+  const id = extractTweetInfo(article).tweetId;
+  const mark = zsUserMarks[id];
+  if (mark) userMarkBadge(article, mark.verdict);
+}
+
+// ---- The bot button ----
+
+function botButton(label, onClick) {
+  const btn = el('button', { type: 'button', class: 'zs-action-btn', 'aria-label': label, title: 'ZeroSlop' });
+  btn.innerHTML = BOT_ICON;
+  btn.addEventListener('mousedown', (e) => e.stopPropagation());
+  btn.addEventListener('click', (e) => { stop(e); onClick(btn); });
+  return btn;
+}
+
+function injectPostButton(article) {
+  if (zsSettings.postButton === false || !article || article.querySelector('.zs-action-wrap')) return;
+  const button = botButton('ZeroSlop: check this post or mark it as slop', (btn) => openPanelFor(article, btn));
+  const wrap = el('div', { class: 'zs-action-wrap' }, [button]);
+  // X's action row (reply, repost, like, views, bookmark, share). Fall back to beside the timestamp.
+  const bar = Array.from(article.querySelectorAll('[role="group"]')).pop();
+  if (bar && bar.closest('article') === article) {
+    bar.appendChild(wrap);
+  } else {
+    const time = article.querySelector('time');
+    const anchor = time ? (time.closest('a') || time) : null;
+    if (!anchor) return;
+    wrap.classList.add('zs-action-inline');
+    anchor.after(wrap);
+  }
+}
+
+function injectProfileButton() {
+  const handle = currentProfileHandle();
+  if (!handle || zsSettings.postButton === false) return;
+  const header = document.querySelector('[data-testid="UserName"]');
+  if (!header || header.querySelector('.zs-profile-btn')) return;
+  // Read the handle on click: X can reuse the header element when moving between profiles.
+  const button = botButton(`ZeroSlop: check @${handle} or mark the account as slop`, (btn) => {
+    const current = currentProfileHandle();
+    if (current) openPanel(buildProfileContext(current), btn);
+  });
+  button.classList.add('zs-profile-btn');
+  button.append(el('span', { text: 'ZeroSlop' }));
+  header.appendChild(el('div', { class: 'zs-header-badge' }, [button]));
+}
+
+// ---- What are we looking at? ----
+
+function postMedia(article) {
+  return collectPostMedia(article)
+    .filter((m) => !m.quoted)
+    .map((m) => ({ ...m, url: mediumSize(m.url), mediaId: mediaIdFromUrl(m.url) }))
+    .filter((m) => m.mediaId);
+}
+
+function buildPostContext(article) {
+  const info = extractTweetInfo(article);
+  const handle = info.author?.handle && info.author.handle !== '@anonymous' ? info.author.handle : null;
+  const media = postMedia(article);
+  // On a post's own page, the author's other posts in view form the thread.
+  const statusMatch = window.location.pathname.match(/\/status\/(\d+)/);
+  const thread = statusMatch && handle ? tweetsByHandle(handle) : [];
+  const scopes = ['post'];
+  if (thread.length >= 2) scopes.push('thread');
+  if (handle) scopes.push('account');
+  const isFocalPost = statusMatch && statusMatch[1] === info.tweetId;
+  return {
+    type: 'post', article, info, handle, media, thread, scopes,
+    scope: isFocalPost && thread.length >= 2 ? 'thread' : 'post'
+  };
+}
+
+function buildProfileContext(handle) {
+  const at = `@${handle}`;
+  const header = document.querySelector('[data-testid="UserName"]');
+  const name = header?.querySelector('span')?.innerText || '';
+  const pfp = document.querySelector('a[href$="/photo"] img')?.src || '';
+  return { type: 'profile', handle: at, author: { handle: at, name, pfp }, scopes: ['account'], scope: 'account', thread: [], media: [] };
+}
+
+function openPanelFor(article, anchor) {
+  openPanel(buildPostContext(article), anchor || article.querySelector('.zs-action-btn') || article);
+}
+
+function mediaSummary(media) {
+  const images = media.filter((m) => m.kind === 'image').length;
+  const videos = media.filter((m) => m.kind === 'video').length;
+  const parts = [];
+  if (images) parts.push(`${images} ${images === 1 ? 'image' : 'images'}`);
+  if (videos) parts.push(`${videos} ${videos === 1 ? 'video' : 'videos'}`);
+  return parts.join(', ');
+}
+
+function scopeSummary(ctx) {
+  const at = ctx.handle ? `@${normHandle(ctx.handle)}` : 'this account';
+  if (ctx.scope === 'thread') return `Thread · ${ctx.thread.length} posts by ${at}`;
+  if (ctx.scope === 'account') return `Account · ${at}`;
+  const media = mediaSummary(ctx.media);
+  return `Post by ${at}${media ? ` · ${media}` : ctx.info?.text ? ' · text' : ''}`;
+}
+
+function accountAuthor(ctx) {
+  return ctx.type === 'profile' ? ctx.author : { ...(ctx.info?.author || {}), handle: ctx.handle };
+}
+
+/** Labels ZeroSlop already has for this scope, shown before the person decides. */
+function knownLabels(ctx) {
+  const chips = [];
+  if (ctx.scope === 'post' && ctx.article) {
+    const badges = Array.from(ctx.article.querySelectorAll('.zs-badge')).map((b) => b._zsSpec).filter(Boolean);
+    for (const spec of badges) {
+      if (spec.kind === 'marked') continue;
+      chips.push({ tone: spec.tone, text: spec.title || spec.label });
+    }
+    for (const m of ctx.media) {
+      const saved = zsImageCache[m.mediaId];
+      if (saved && !badges.some((b) => b.kind === 'image')) chips.push({ tone: detectTone(saved.score), text: `${m.kind === 'video' ? 'Video' : 'Image'}: ${saved.score}% likely AI (your earlier check)` });
+    }
+  }
+  if (ctx.scope === 'account' || ctx.scope === 'thread') {
+    const status = ctx.handle && zsAccountStatus.get(normHandle(ctx.handle));
+    if (status && BADGE_KINDS[status]) chips.push({ tone: BADGE_KINDS[status].tone, text: `Account: ${BADGE_KINDS[status].title.toLowerCase()}` });
+  }
+  const mark = zsUserMarks[markKey(ctx)];
+  if (mark) chips.push({ tone: mark.verdict === 'slop' ? 'red' : 'green', text: mark.verdict === 'slop' ? 'You marked this as slop' : 'You marked this as not slop' });
+  return chips;
+}
+
+function markKey(ctx) {
+  if (ctx.scope === 'account') return `acct:${normHandle(ctx.handle)}`;
+  if (ctx.scope === 'thread') return extractTweetInfo(ctx.thread[0]).tweetId;
+  return ctx.info?.tweetId;
+}
+
+// ---- Panel rendering ----
+
+function closePanel({ restoreFocus = false } = {}) {
+  if (!zsPanel) return;
+  const { el: node, anchor } = zsPanel;
+  node.remove();
+  zsPanel = null;
+  if (restoreFocus && anchor?.isConnected && anchor.focus) anchor.focus();
+}
+
+function positionPanel(node, anchor) {
+  const rect = (anchor && anchor.isConnected ? anchor : document.body).getBoundingClientRect();
+  const box = node.getBoundingClientRect();
+  let top = rect.bottom + 8;
+  if (top + box.height > window.innerHeight - 12) top = Math.max(12, rect.top - box.height - 8);
+  let left = rect.right - box.width;
+  left = Math.min(Math.max(12, left), window.innerWidth - box.width - 12);
+  node.style.top = `${Math.max(12, top)}px`;
+  node.style.left = `${left}px`;
+}
+
+function openPanel(ctx, anchor) {
+  closePopover();
+  closeResultCard();
+  if (zsPanel && zsPanel.ctx.article === ctx.article && zsPanel.ctx.type === ctx.type && ctx.type === 'post') { closePanel(); return; }
+  closePanel();
+
+  const node = el('section', { class: 'zs-surface zs-panel', role: 'dialog', 'aria-labelledby': 'zs-panel-title' });
+  ['click', 'mousedown', 'pointerdown'].forEach((t) => node.addEventListener(t, (e) => e.stopPropagation()));
+  zsPanel = { el: node, ctx, anchor, results: {}, busy: false, knownAtOpen: {} };
+  renderPanel();
+  document.body.appendChild(node);
+  positionPanel(node, anchor);
+  node.querySelector('.zs-panel-primary, button')?.focus({ preventScroll: true });
+}
+
+function renderPanel() {
+  if (!zsPanel) return;
+  const { el: node, ctx, results } = zsPanel;
+  const scopeLabels = { post: 'Post', thread: `Thread (${ctx.thread.length})`, account: 'Account' };
+
+  const head = el('div', { class: 'zs-card-head' }, [
+    el('span', { class: 'zs-eyebrow', text: 'ZeroSlop' }),
+    el('button', { type: 'button', class: 'zs-icon-btn', 'aria-label': 'Close', onclick: () => closePanel({ restoreFocus: true }) }, '×')
+  ]);
+
+  const scopeSwitch = ctx.scopes.length > 1
+    ? el('div', { class: 'zs-seg', role: 'radiogroup', 'aria-label': 'What to check' }, ctx.scopes.map((s) => el('button', {
+      type: 'button', role: 'radio', 'aria-checked': String(ctx.scope === s), class: ctx.scope === s ? 'zs-seg-on' : '',
+      onclick: () => { if (zsPanel.busy) return; ctx.scope = s; zsPanel.results = {}; renderPanel(); }
+    }, scopeLabels[s])))
+    : null;
+
+  // Snapshot per scope, taken before any check, so new results show only in the results list.
+  if (!zsPanel.knownAtOpen[ctx.scope]) zsPanel.knownAtOpen[ctx.scope] = knownLabels(ctx);
+  const chips = zsPanel.knownAtOpen[ctx.scope];
+  const known = el('div', { class: 'zs-known' }, chips.length
+    ? chips.map((c) => el('span', { class: `zs-chip zs-tone-${c.tone || 'gray'}` }, [el('span', { class: 'zs-dot', 'aria-hidden': 'true' }), c.text]))
+    : [el('span', { class: 'zs-muted', text: 'Nothing known about this yet.' })]);
+
+  const checkLabel = { post: ctx.media.length ? 'Check this post and its media' : 'Check this post', thread: 'Check the whole thread', account: 'Check this account' }[ctx.scope];
+  const checkBtn = el('button', { type: 'button', class: 'zs-btn zs-btn-secondary zs-btn-block', disabled: zsPanel.busy }, results.checked ? 'Check again' : checkLabel);
+  checkBtn.addEventListener('click', () => runPanelCheck());
+
+  const resultRows = el('div', { class: 'zs-results', 'aria-live': 'polite' }, Object.values(results.rows || {}).map(resultRow));
+
+  node.replaceChildren(...[
+    head,
+    el('p', { class: 'zs-title', id: 'zs-panel-title', text: scopeSummary(ctx) }),
+    scopeSwitch,
+    known,
+    checkBtn,
+    resultRows,
+    renderQuestion(ctx),
+    renderExtras(ctx)
+  ].filter(Boolean));
+}
+
+function resultRow(row) {
+  const right = row.state === 'running'
+    ? el('span', { class: 'zs-row-status' }, [el('span', { class: 'zs-spinner zs-spinner-sm', 'aria-hidden': 'true' }), row.status || 'Checking…'])
+    : row.state === 'error'
+      ? el('span', { class: 'zs-row-status zs-muted', text: row.status })
+      : el('span', { class: `zs-row-score zs-tone-${row.tone}`, text: row.value });
+  const node = el('div', { class: 'zs-result-row' }, [
+    el('div', { style: 'min-width: 0' }, [el('div', { class: 'zs-row-label', text: row.label }), row.detail ? el('div', { class: 'zs-row-detail', text: row.detail }) : null]),
+    right
+  ]);
+  if (row.explain) {
+    node.querySelector('div').appendChild(el('button', { type: 'button', class: 'zs-link-btn', onclick: row.explain }, 'Explain with Gemma 4'));
+  }
+  return node;
+}
+
+function renderQuestion(ctx) {
+  const isAccount = ctx.scope === 'account';
+  const at = ctx.handle ? `@${normHandle(ctx.handle)}` : 'this account';
+  const question = isAccount ? `Is ${at} a slop account?` : ctx.scope === 'thread' ? 'Is this thread slop?' : 'Is this post slop?';
+  const hint = zsPanel.results.checked
+    ? 'Checks can be wrong. Your answer is what counts.'
+    : 'You can answer without checking first.';
+
+  const yes = el('button', { type: 'button', class: 'zs-btn zs-btn-danger zs-panel-primary', disabled: zsPanel.busy }, 'Yes, it’s slop');
+  const no = el('button', { type: 'button', class: 'zs-btn zs-btn-secondary', disabled: zsPanel.busy }, isAccount ? 'No, a real person' : 'No');
+  yes.addEventListener('click', () => answerPanel('slop'));
+  no.addEventListener('click', () => answerPanel('not_slop'));
+
+  return el('div', { class: 'zs-question' }, [
+    el('div', { class: 'zs-question-title', text: question }),
+    el('div', { class: 'zs-row' }, [yes, no]),
+    el('div', { class: 'zs-hint', text: hint }),
+    renderDetails(ctx)
+  ]);
+}
+
+function renderDetails(ctx) {
+  const details = el('details', { class: 'zs-details', style: 'margin-top: 10px' }, [el('summary', { text: 'Add details (optional)' })]);
+  const form = {};
+  if (ctx.scope === 'account') {
+    const name = `zs-acct-${Date.now()}`;
+    form.factory = el('input', { type: 'radio', name, value: 'shield-red', checked: true });
+    form.highai = el('input', { type: 'radio', name, value: 'shield-blue' });
+    details.append(
+      el('div', { class: 'zs-field-label', text: 'If it’s slop, label the account as' }),
+      el('label', { class: 'zs-check' }, [form.factory, 'Slop factory (bot networks, funnels)']),
+      el('label', { class: 'zs-check' }, [form.highai, 'High AI use'])
+    );
+  } else {
+    const text = ctx.scope === 'thread' ? ctx.thread.map((a) => extractTweetInfo(a).text).join('\n') : ctx.info?.text;
+    form.tactic = el('select', { id: 'zs-tactic', class: 'zs-select' }, [el('option', { value: '', text: 'General slop' })]);
+    const suggested = suggestSlopType(text);
+    SLOP_TYPES.filter((t) => t.id !== 'type_organic_human').forEach((t) => {
+      const opt = el('option', { value: t.id, text: `${t.emoji} ${t.name}` });
+      if (t.id === suggested) opt.selected = true;
+      form.tactic.appendChild(opt);
+    });
+    const box = (label, checked = false) => { const input = el('input', { type: 'checkbox', checked }); return { input, node: el('label', { class: 'zs-check' }, [input, label]) }; };
+    form.accountability = box('No accountable author');
+    form.funnel = box('Contains a funnel or call to action');
+    form.replicability = box('Claims can’t be replicated');
+    form.flag = ctx.handle ? box(`Also flag @${normHandle(ctx.handle)} as a slop factory`) : null;
+    form.amplifiers = box('Find accounts that amplified it (opens 2 tabs briefly)');
+    details.append(
+      el('label', { class: 'zs-field-label', for: 'zs-tactic', text: 'Tactic' }), form.tactic,
+      el('div', { class: 'zs-field-label', text: 'Extraction test' }), form.accountability.node, form.funnel.node, form.replicability.node,
+      el('div', { class: 'zs-field-label', text: 'More' }), form.flag?.node, form.amplifiers.node
+    );
+  }
+  zsPanel.form = form;
+  return details;
+}
+
+function renderExtras(ctx) {
+  const author = accountAuthor(ctx);
+  if (!author?.handle) return null;
+  const poster = el('button', { type: 'button', class: 'zs-link-btn' }, 'Copy a “wanted” poster');
+  poster.addEventListener('click', () => {
+    const score = Math.max(0, ...Object.values(zsPanel.results.rows || {}).map((r) => r.number || 0));
+    generateWantedPoster(author, score)
+      .then(() => zsToast('Poster copied to your clipboard.', { tone: 'green' }))
+      .catch(() => zsToast('Couldn’t copy the poster. Your browser may have blocked clipboard access.', { tone: 'red' }));
+  });
+  return el('div', { class: 'zs-panel-footer' }, [poster, el('a', { href: ZS_REGISTRY_URL, target: '_blank', rel: 'noopener', text: 'Registry ↗' })]);
+}
+
+function setRow(key, row) {
+  if (!zsPanel) return;
+  zsPanel.results.rows = { ...(zsPanel.results.rows || {}), [key]: { ...(zsPanel.results.rows?.[key] || {}), ...row } };
+  renderPanel();
+}
+
+// ---- Checks ----
+
+function localSlopScore(text) {
+  const prediction = text && text.length > 20 ? ZeroSlopClassifier.predict(text) : null;
+  if (!prediction) return null;
+  return Math.round((1 - prediction.probabilities['organic-human']) * 100);
+}
+
+async function hasZeroGptKey() {
+  const { zerogptApiKey } = await chrome.storage.local.get(['zerogptApiKey']);
+  return !!zerogptApiKey;
+}
+
+async function checkText(key, label, text, { tweetId, author } = {}) {
+  if (!text || text.trim().length < 20) {
+    setRow(key, { label, state: 'error', status: 'Too little text to check' });
+    return null;
+  }
+  setRow(key, { label, state: 'running', status: 'Checking…' });
+  if (await hasZeroGptKey()) {
+    const res = await chrome.runtime.sendMessage({ action: 'zerogptScore', text, tweetId, author });
+    if (res && typeof res.score === 'number') {
+      setRow(key, { label, state: 'done', detail: 'ZeroGPT', value: `${res.score}% AI`, number: res.score, tone: scoreTone(res.score) });
+      return res.score;
+    }
+  }
+  const local = localSlopScore(text);
+  if (local === null) {
+    setRow(key, { label, state: 'error', status: 'Couldn’t check the text' });
+    return null;
+  }
+  setRow(key, { label, state: 'done', detail: 'On-device model (slop signals)', value: `${local}%`, number: local, tone: detectTone(local) });
+  return local;
+}
+
+/** Run the image detector on one media item and resolve with its score (or null). */
+function detectMediaScore(m, { tweetId, author, onStatus } = {}) {
+  return new Promise((resolve) => {
+    const requestId = crypto.randomUUID();
+    const timer = setTimeout(() => { panelRequests.delete(requestId); resolve(null); }, 120000);
+    panelRequests.set(requestId, {
+      onStatus,
+      resolve: (score) => { clearTimeout(timer); panelRequests.delete(requestId); resolve(score); }
+    });
+    const frame = m.kind === 'video' ? captureVideoFrame(m.video) : null;
+    chrome.runtime.sendMessage({
+      action: 'detectMedia', requestId,
+      media: { url: m.url, tweetId, kind: m.kind, mediaId: m.mediaId, author, frames: frame ? [frame] : [] }
+    });
+  });
+}
+
+function mediaRowLabel(m, i, list) {
+  const same = list.filter((x) => x.kind === m.kind);
+  const n = same.length > 1 ? ` ${same.indexOf(m) + 1}` : '';
+  return `${m.kind === 'video' ? 'Video' : 'Image'}${n}`;
+}
+
+async function checkMedia(ctx) {
+  const tweetId = ctx.info?.tweetId;
+  const scores = {};
+  await Promise.all(ctx.media.map(async (m, i, list) => {
+    const key = `media:${m.mediaId}`;
+    const label = mediaRowLabel(m, i, list);
+    setRow(key, { label, state: 'running', status: 'Checking…' });
+    const score = await detectMediaScore(m, {
+      tweetId, author: ctx.handle,
+      onStatus: (s) => {
+        const status = s.stage === 'downloading' && s.total
+          ? `Downloading detector ${Math.round(s.progress || 0)}%`
+          : s.stage === 'starting' ? 'Starting detector…' : 'Checking…';
+        setRow(key, { state: 'running', status });
+      }
+    });
+    if (typeof score === 'number') {
+      scores[m.mediaId] = score;
+      setRow(key, {
+        state: 'done', value: `${score}% AI`, number: score, tone: detectTone(score),
+        detail: m.kind === 'video' ? 'Detector · preview frame' : 'AI-image detector',
+        explain: () => {
+          closePanel();
+          chrome.runtime.sendMessage({ action: 'explainImage', url: m.url, tweetId, mediaId: m.mediaId });
+          showImageCard({ state: 'progress', requestId: `explain-${m.mediaId}`, stage: 'starting' });
+        }
+      });
+    } else {
+      setRow(key, { state: 'error', status: 'Couldn’t check it' });
+    }
+  }));
+  return scores;
+}
+
+async function runPanelCheck() {
+  if (!zsPanel || zsPanel.busy) return;
+  const ctx = zsPanel.ctx;
+  zsPanel.busy = true;
+  zsPanel.results = { rows: {} };
+  renderPanel();
+  try {
+    if (ctx.scope === 'post') {
+      const jobs = [];
+      if (ctx.info?.text) jobs.push(checkText('text', 'Text', ctx.info.text, { tweetId: ctx.info.tweetId, author: ctx.info.author }));
+      if (ctx.media.length) jobs.push(checkMedia(ctx).then((s) => { zsPanel && (zsPanel.mediaScores = s); }));
+      if (!jobs.length) setRow('none', { label: 'Nothing to check', state: 'error', status: 'No text or media' });
+      await Promise.all(jobs);
+    } else if (ctx.scope === 'thread') {
+      const posts = ctx.thread.map((a) => extractTweetInfo(a));
+      const text = posts.map((p) => p.text).filter(Boolean).join('\n\n');
+      await checkText('text', `Thread text (${posts.length} posts)`, text, { tweetId: posts[0]?.tweetId, author: posts[0]?.author });
+    } else {
+      await checkAccount(ctx);
+    }
+  } finally {
+    if (zsPanel && zsPanel.ctx === ctx) {
+      zsPanel.busy = false;
+      zsPanel.results.checked = true;
+      renderPanel();
+    }
+  }
+}
+
+async function checkAccount(ctx) {
+  setRow('registry', { label: 'Community registry', state: 'running', status: 'Looking up…' });
+  const data = await chrome.runtime.sendMessage({ action: 'checkProfileSlop', handle: ctx.handle }).catch(() => null);
+  if (data && data.highSlopCount) {
+    setRow('registry', { state: 'done', detail: `${data.highSlopCount} AI-heavy posts on record`, value: `avg ${data.avgScore}%`, number: data.avgScore, tone: scoreTone(data.avgScore) });
+  } else {
+    setRow('registry', { state: 'error', status: 'No posts on record' });
+  }
+  const posts = tweetsByHandle(ctx.handle).map((a) => extractTweetInfo(a).text).filter((t) => t && t.length > 20);
+  if (!posts.length) {
+    setRow('visible', { label: 'Posts on screen', state: 'error', status: 'None to check here' });
+    return;
+  }
+  const scores = posts.map(localSlopScore).filter((x) => x !== null);
+  const sloppy = scores.filter((x) => x >= 70).length;
+  const pct = Math.round((sloppy / scores.length) * 100);
+  setRow('visible', { label: 'Posts on screen', detail: 'On-device model', state: 'done', value: `${sloppy} of ${scores.length} look like slop`, number: pct, tone: detectTone(pct) });
+}
+
+// ---- Answers ----
+
+async function ensureMediaScores(ctx) {
+  const scores = { ...(zsPanel?.mediaScores || {}) };
+  const missing = ctx.media.filter((m) => typeof scores[m.mediaId] !== 'number' && typeof zsImageCache[m.mediaId]?.score !== 'number');
+  ctx.media.forEach((m) => { if (typeof scores[m.mediaId] !== 'number' && typeof zsImageCache[m.mediaId]?.score === 'number') scores[m.mediaId] = zsImageCache[m.mediaId].score; });
+  if (missing.length) {
+    const got = await Promise.all(missing.map((m) => detectMediaScore(m, { tweetId: ctx.info?.tweetId, author: ctx.handle })));
+    missing.forEach((m, i) => { if (typeof got[i] === 'number') scores[m.mediaId] = got[i]; });
+  }
+  return scores;
+}
+
+function readForm() {
+  const f = zsPanel?.form || {};
+  return {
+    slopType: f.tactic?.value || '',
+    extractionResults: f.accountability ? { accountability: f.accountability.input.checked, funnel: f.funnel.input.checked, replicability: f.replicability.input.checked } : null,
+    flagAccount: !!f.flag?.input.checked,
+    findAmplifiers: !!f.amplifiers?.input.checked,
+    accountShield: f.highai?.checked ? 'shield-blue' : 'shield-red'
+  };
+}
+
+async function answerPanel(verdict) {
+  if (!zsPanel || zsPanel.busy) return;
+  const ctx = zsPanel.ctx;
+  const form = readForm();
+  const slop = verdict === 'slop';
+  const textScore = zsPanel.results.rows?.text?.detail === 'ZeroGPT' ? zsPanel.results.rows.text.number : 0;
+  const actions = [];
+  const marked = []; // [article, key] to label locally
+
+  zsPanel.busy = true;
+  renderPanel();
+
+  if (ctx.scope === 'post') {
+    const { tweetId, text, author } = ctx.info;
+    actions.push(slop
+      ? { type: 'reportPost', tweetId, text, author, aiScore: textScore, slopType: form.slopType, extractionResults: form.extractionResults, shieldType: form.flagAccount ? 'shield-red' : undefined, findAmplifiers: form.findAmplifiers }
+      : { type: 'reportPost', tweetId, text, author, aiScore: 0, slopType: 'type_organic_human' });
+    if (ctx.article.querySelector('.zs-badge[data-kind="score"]')) actions.push({ type: 'votePost', tweetId, voteType: slop ? 'up' : 'down' });
+    if (ctx.media.length) {
+      setRow('saving', { label: 'Saving with image scores', state: 'running', status: 'Checking media…' });
+      const scores = await ensureMediaScores(ctx);
+      for (const m of ctx.media) {
+        if (typeof scores[m.mediaId] === 'number') actions.push({ type: 'markImage', mediaId: m.mediaId, url: m.url, kind: m.kind, score: scores[m.mediaId], tweetId, author: ctx.handle, verdict });
+      }
+    }
+    marked.push([ctx.article, tweetId]);
+  } else if (ctx.scope === 'thread') {
+    ctx.thread.slice(0, 10).forEach((article, i) => {
+      const { tweetId, text, author } = extractTweetInfo(article);
+      actions.push(slop
+        ? { type: 'reportPost', tweetId, text, author, aiScore: i === 0 ? textScore : 0, slopType: form.slopType, extractionResults: form.extractionResults, shieldType: i === 0 && form.flagAccount ? 'shield-red' : undefined, findAmplifiers: i === 0 && form.findAmplifiers }
+        : { type: 'reportPost', tweetId, text, author, aiScore: 0, slopType: 'type_organic_human' });
+      marked.push([article, tweetId]);
+    });
+  } else {
+    const author = accountAuthor(ctx);
+    const status = zsAccountStatus.get(normHandle(ctx.handle));
+    if (status === 'factory' || status === 'highai') {
+      // Already labelled: the answer counts as agreeing or disagreeing.
+      actions.push({ type: 'voteAccount', handle: ctx.handle, voteType: slop ? 'up' : 'down' });
+      if (slop && form.accountShield === 'shield-blue' && status === 'factory') actions.push({ type: 'reportAccount', author, shieldType: 'shield-blue' });
+    } else {
+      actions.push({ type: 'reportAccount', author, shieldType: slop ? form.accountShield : 'shield-green' });
+    }
+    marked.push([null, `acct:${normHandle(ctx.handle)}`]);
+  }
+
+  const batchId = crypto.randomUUID();
+  const previous = marked.map(([, key]) => [key, zsUserMarks[key]?.verdict || null]);
+  chrome.runtime.sendMessage({ action: 'queueSlopActions', batchId, actions });
+  marked.forEach(([article, key]) => { saveUserMark(key, verdict); userMarkBadge(article, verdict); });
+
+  const what = ctx.scope === 'account' ? `@${normHandle(ctx.handle)}` : ctx.scope === 'thread' ? 'Thread' : 'Post';
+  const message = slop ? `${what} marked as slop.` : `${what} marked as not slop.`;
+  closePanel({ restoreFocus: true });
+  zsToast(message, {
+    tone: slop ? 'red' : 'green',
+    timeout: 5000,
+    actions: [{
+      label: 'Undo',
+      onClick: async () => {
+        const res = await chrome.runtime.sendMessage({ action: 'cancelSlopActions', batchId }).catch(() => null);
+        if (res && res.cancelled) {
+          previous.forEach(([key, verdictBefore]) => saveUserMark(key, verdictBefore));
+          marked.forEach(([article, key]) => userMarkBadge(article, zsUserMarks[key]?.verdict || null));
+          zsToast('Undone. Nothing was sent.', { tone: 'gray' });
+        } else {
+          zsToast('Too late to undo: it was already sent. Open the panel to change your answer.', { tone: 'amber' });
+        }
+      }
+    }]
+  });
+}
+
+function openPanelFromMenu() {
+  const article = getTweetContainer(lastRightClickedElement);
+  if (article) {
+    openPanelFor(article, article.querySelector('.zs-action-btn') || lastRightClickedElement || article);
+    return;
+  }
+  const handle = currentProfileHandle();
+  if (handle) {
+    openPanel(buildProfileContext(handle), document.querySelector('.zs-profile-btn') || document.querySelector('[data-testid="UserName"]'));
+    return;
+  }
+  zsToast('Right-click a post or open a profile to use ZeroSlop.', { tone: 'gray' });
 }
 
 // ---------------------------------------------------------------------------

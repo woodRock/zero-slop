@@ -1,5 +1,32 @@
 # Release Notes
 
+## v1.7.0 (November 18, 2026)
+
+### One workflow for checking and tagging
+- **A bot button on every post and profile** replaces the six-item right-click menu. It sits in the post's action row, in X's own grey, and falls back to beside the timestamp. The right-click menu is now a single **ZeroSlop…** item that opens the same panel. You can hide the button in the popup.
+- **The panel works out what you're looking at.** For example "Post by @x · 1 image", "Thread · 5 posts by @x" (on a post's own page) or "Account · @x". A Post / Thread / Account switch is preset, and you change it only if you want something else.
+- **It shows what's already known** (registry scores, image scores, account labels, your earlier answers) before you act.
+- **Check runs the right scan for that choice:**
+  - post text: the free on-device model, or ZeroGPT when a key is saved;
+  - photos and videos: the AI-image detector, with "Explain with Gemma 4" for each item;
+  - a thread: all of its posts;
+  - an account: its registry history plus the posts on screen.
+- **"Is this slop?" Yes / No is always there,** before or after a check. Scans inform; people decide. Marking a post that has media scores its images first, so the mark is saved with a detector score.
+- **Undo for 5 seconds.** Answers are held in the background and sent only after the undo window.
+- **Answers persist.** Posts keep a "You: slop" or "You: not slop" label after a refresh (up to 1,000 answers saved).
+- **One concept instead of two.** On content that's already labelled, your Yes or No also counts as a 👍 or 👎 on that label.
+- **Optional details:** tactic (pre-suggested), extraction test, "Also flag @x as a slop factory", "Find accounts that amplified it", and for accounts, slop factory or high AI use.
+- The wanted poster moved into the panel.
+
+### Changes
+- Image registry entries now record people's answers (`marked_slop` / `marked_not_slop`).
+- "Find amplifiers" (which opens 2 background tabs) is now opt-in, instead of running on every report.
+- Selecting text and choosing "Check with ZeroGPT" is gone; the panel's Check covers post text.
+
+### Fixes
+- An account-only report no longer writes an empty post record.
+
+---
 ## v1.6.0 (November 18, 2026)
 
 ### On-device image check
