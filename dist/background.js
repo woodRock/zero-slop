@@ -633,7 +633,10 @@ async function storeSlopTweet(tweetId, text, percentage, author, isManual = fals
       update: {
         name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry/${tweetId}`,
         fields: fields
-      }
+      },
+      // Only write these fields. Without a mask Firestore replaces the whole document,
+      // wiping votes and anything this report doesn't include.
+      updateMask: { fieldPaths: Object.keys(fields) }
     }]
   };
 
@@ -692,7 +695,10 @@ async function storeHumanTweet(tweetId, text, author) {
       update: {
         name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/human_registry/${tweetId}`,
         fields: fields
-      }
+      },
+      // Only write these fields. Without a mask Firestore replaces the whole document,
+      // wiping votes and anything this report doesn't include.
+      updateMask: { fieldPaths: Object.keys(fields) }
     }]
   };
 
@@ -810,7 +816,10 @@ async function storeSuspiciousAccount(handle, name, pfp, tweetId, factoryHandle 
       update: {
         name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/suspicious_accounts/${accountId}`,
         fields: fields
-      }
+      },
+      // Only write these fields. Without a mask Firestore replaces the whole document,
+      // wiping votes and anything this report doesn't include.
+      updateMask: { fieldPaths: Object.keys(fields) }
     }]
   };
 
