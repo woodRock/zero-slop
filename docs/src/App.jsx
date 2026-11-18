@@ -1,18 +1,90 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
 import FieldGuide from './components/FieldGuide'
 import SlopCycle from './components/SlopCycle'
 import SlopMap from './components/SlopMap'
 
+// Firebase Config (Public values only)
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDDx5ZbgWcgsKxsP78EubqyWRHL9yxdXec",
+  projectId: "zero-slop"
+};
+const FIRESTORE_DOCS = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents`;
+
+// Firestore's free plan allows about 50,000 document reads a day, shared by every visitor
+// and every extension user, so the site reads as little as it can:
+// - stats and recent detections refresh every 5 minutes, only while the tab is visible,
+//   and the last result is shared between tabs through localStorage;
+// - the full collections (search, network map, CSV) are read once and kept for 30 minutes;
+// - after a 429 (quota exceeded) no request is made for 5 minutes.
+const STATS_REFRESH_MS = 5 * 60 * 1000;
+const FULL_DATA_TTL_MS = 30 * 60 * 1000;
+const QUOTA_BACKOFF_MS = 5 * 60 * 1000;
+const STATS_CACHE_KEY = 'zeroslop_registry_stats_v1';
+const REGISTRY_UNAVAILABLE = "The community registry is temporarily unavailable. Try again later.";
+
+let registryBackoffUntil = 0;
+
+async function registryFetch(url) {
+  if (Date.now() < registryBackoffUntil) throw new Error('Registry backing off after a quota error');
+  const res = await fetch(url);
+  if (res.status === 429) registryBackoffUntil = Date.now() + QUOTA_BACKOFF_MS;
+  if (!res.ok) throw new Error(`Registry request failed: HTTP ${res.status}`);
+  return res.json();
+}
+
+// Reads every document in a collection. Throws if any page fails, so callers never
+// mistake a partial read for the whole registry.
+async function fetchAllPages(collection) {
+  let allDocsArr = [];
+  let pageToken = "";
+  do {
+    const url = `${FIRESTORE_DOCS}/${collection}?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000&orderBy=last_updated desc&pageToken=${pageToken}`;
+    const data = await registryFetch(url);
+    if (data.documents) allDocsArr = allDocsArr.concat(data.documents);
+    pageToken = data.nextPageToken || "";
+  } while (pageToken);
+  return allDocsArr;
+}
+
+function parseStatsDoc(statsData) {
+  const fields = statsData.fields || {};
+  const remoteTotal = parseInt(fields.total_slops?.integerValue || fields.total_slops?.doubleValue || 0);
+  const remoteAccounts = parseInt(fields.total_accounts?.integerValue || fields.total_accounts?.doubleValue || 0);
+  const dailyMap = fields.daily_stats?.mapValue?.fields || {};
+  const trendStats = {};
+  Object.keys(dailyMap).forEach(date => {
+    trendStats[date] = parseInt(dailyMap[date]?.integerValue || dailyMap[date]?.doubleValue || 0);
+  });
+  return {
+    stats: { count: remoteTotal.toLocaleString(), accounts: remoteAccounts.toLocaleString(), rawCount: remoteTotal },
+    trendStats
+  };
+}
+
+function parseRecentDocs(data) {
+  return (data.documents || [])
+    .filter(doc => (doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0) > 15)
+    .map(doc => ({
+      name: doc.fields.author_name?.stringValue || "Unknown",
+      handle: doc.fields.author_handle?.stringValue || "@anonymous",
+      score: Math.round(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0),
+      pfp: doc.fields.author_pfp?.stringValue || "🤖",
+      updateTime: doc.updateTime
+    }));
+}
+
+function readStatsCache() {
+  try { return JSON.parse(localStorage.getItem(STATS_CACHE_KEY)) || null; } catch { return null; }
+}
+
+function writeStatsCache(entry) {
+  try { localStorage.setItem(STATS_CACHE_KEY, JSON.stringify(entry)); } catch { /* storage full or blocked */ }
+}
+
 function App() {
   const year = new Date().getFullYear();
   const baseUrl = import.meta.env.BASE_URL;
-  
-  // Firebase Config (Public values only)
-  const FIREBASE_CONFIG = {
-    apiKey: "AIzaSyDDx5ZbgWcgsKxsP78EubqyWRHL9yxdXec",
-    projectId: "zero-slop"
-  };
 
   const [stats, setStats] = useState({ count: "...", accounts: "..." });
   const [wallOfShame, setWallOfShame] = useState([]);
@@ -24,26 +96,37 @@ function App() {
   const [trendStats, setTrendStats] = useState({});
   const [activeMapHandle, setActiveMapHandle] = useState(null);
   const [activeMapAmplifiers, setActiveMapAmplifiers] = useState([]);
-  
+  const [registryNotice, setRegistryNotice] = useState(null);
+  const fullDataRef = useRef({ promise: null, loadedAt: 0 });
+  const latestQueryRef = useRef("");
+
   const GOAL = 5000; // Community goal
 
-  const fetchAllPages = async (collection) => {
-    let allDocsArr = [];
-    let pageToken = "";
-    
-    try {
-      do {
-        const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/${collection}?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000&orderBy=last_updated desc&pageToken=${pageToken}&t=${Date.now()}`;
-        const res = await fetch(url);
-        if (!res.ok) break;
-        const data = await res.json();
-        if (data.documents) allDocsArr = [...allDocsArr, ...data.documents];
-        pageToken = data.nextPageToken || "";
-      } while (pageToken);
-    } catch (e) {
-      console.error(`Error fetching ${collection}:`, e);
-    }
-    return allDocsArr;
+  // Reads all three collections at most once per FULL_DATA_TTL_MS. Concurrent callers share
+  // one request. On failure the last good data stays on screen and a notice is shown.
+  const loadAllCollections = () => {
+    const cache = fullDataRef.current;
+    if (cache.promise && (!cache.loadedAt || Date.now() - cache.loadedAt < FULL_DATA_TTL_MS)) return cache.promise;
+    const promise = Promise.all([
+      fetchAllPages('slop_registry'),
+      fetchAllPages('slop_accounts'),
+      fetchAllPages('suspicious_accounts')
+    ]).then(([reg, acc, susp]) => {
+      if (fullDataRef.current.promise === promise) fullDataRef.current.loadedAt = Date.now();
+      setAllDocs(reg); setAllAccounts(acc); setAllSuspicious(susp);
+      return { reg, acc, susp };
+    }).catch((e) => {
+      console.error("ZeroSlop: Failed to load the registry", e);
+      if (fullDataRef.current.promise === promise) {
+        // Fall back to whatever loaded before, so a refresh failure doesn't blank the page.
+        fullDataRef.current = cache.loadedAt ? cache : { promise: null, loadedAt: 0 };
+      }
+      setRegistryNotice(REGISTRY_UNAVAILABLE);
+      if (cache.loadedAt) return cache.promise;
+      throw e;
+    });
+    fullDataRef.current = { promise, loadedAt: 0 };
+    return promise;
   };
 
   const findAmplifiersForHandle = (handle) => {
@@ -74,17 +157,12 @@ function App() {
 
     console.log(`ZeroSlop: Discovering network for ${handle}...`);
 
-    // 1. Ensure we have the latest registry data
-    let currentDocs = allDocs;
-    let currentSuspicious = allSuspicious;
-    if (allDocs.length === 0) {
-      const [reg, acc, susp] = await Promise.all([
-        fetchAllPages('slop_registry'),
-        fetchAllPages('slop_accounts'),
-        fetchAllPages('suspicious_accounts')
-      ]);
-      setAllDocs(reg); setAllAccounts(acc); setAllSuspicious(susp);
-      currentDocs = reg; currentSuspicious = susp;
+    // 1. Load the registry (cached; only read from Firestore once per FULL_DATA_TTL_MS)
+    let currentDocs, currentSuspicious;
+    try {
+      ({ reg: currentDocs, susp: currentSuspicious } = await loadAllCollections());
+    } catch {
+      return; // notice is already shown
     }
 
     // 2. Aggressive Linkage
@@ -185,81 +263,92 @@ function App() {
 
   const weeklyAudit = getGlobalAudit();
 
+  // Stats and recent detections: refresh every STATS_REFRESH_MS while the tab is visible.
+  // The result is cached in localStorage, so reloads and other open tabs reuse it.
   useEffect(() => {
-    const fetchRegistryData = async () => {
-      try {
-        const statsUrl = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/stats/global?key=${FIREBASE_CONFIG.apiKey}&t=${Date.now()}`;
-        const statsResponse = await fetch(statsUrl);
+    let inFlight = false;
 
-        const recentRes = await fetch(`https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=5&orderBy=last_updated desc&t=${Date.now()}`);
-
-        if (statsResponse.ok) {
-          const statsData = await statsResponse.json();
-          const fields = statsData.fields || {};
-          const remoteTotal = parseInt(fields.total_slops?.integerValue || fields.total_slops?.doubleValue || 0);
-          const remoteAccounts = parseInt(fields.total_accounts?.integerValue || fields.total_accounts?.doubleValue || 0);
-          
-          // Load pre-aggregated daily stats safely
-          const dailyMap = fields.daily_stats?.mapValue?.fields || {};
-          const tMap = {};
-          Object.keys(dailyMap).forEach(date => {
-            tMap[date] = parseInt(dailyMap[date]?.integerValue || dailyMap[date]?.doubleValue || 0);
-          });
-          setTrendStats(tMap);
-
-          setStats({ 
-            count: remoteTotal.toLocaleString(), 
-            accounts: remoteAccounts.toLocaleString(), 
-            rawCount: remoteTotal 
-          });
-        }
-
-        if (recentRes.ok) {
-          const data = await recentRes.json();
-          const documents = data.documents || [];
-          const recent = documents
-            .filter(doc => {
-              const aiScore = doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0;
-              return aiScore > 15;
-            })
-            .map(doc => ({
-              name: doc.fields.author_name?.stringValue || "Unknown",
-              handle: doc.fields.author_handle?.stringValue || "@anonymous",
-              score: Math.round(doc.fields.ai_score?.doubleValue || doc.fields.ai_score?.integerValue || 0),
-              pfp: doc.fields.author_pfp?.stringValue || "🤖",
-              updateTime: doc.updateTime
-            }));
-          setWallOfShame(recent);
-        }
-
-        const params = new URLSearchParams(window.location.search);
-        const searchVal = params.get('search');
-        if (searchVal) {
-          const handle = '@' + searchVal; setSearchQuery(handle);
-          const [reg, acc, susp] = await Promise.all([fetchAllPages('slop_registry'), fetchAllPages('slop_accounts'), fetchAllPages('suspicious_accounts')]);
-          setAllDocs(reg); setAllAccounts(acc); setAllSuspicious(susp);
-          const realAmps = susp.filter(s => (s.fields.factory_handle?.stringValue || "").toLowerCase().replace('@','') === searchVal.toLowerCase());
-          setActiveMapHandle(handle); setActiveMapAmplifiers(realAmps.map(s => ({ handle: s.fields.handle?.stringValue, type: "Caught Amplifying", rep: 10 })));
-        }
-      } catch (e) { console.error("ZeroSlop: Failed to fetch live stats", e); }
+    const applyEntry = (entry) => {
+      if (entry.stats) setStats(entry.stats);
+      if (entry.trendStats) setTrendStats(entry.trendStats);
+      if (entry.wallOfShame) setWallOfShame(entry.wallOfShame);
+      if (entry.unavailable) setRegistryNotice(REGISTRY_UNAVAILABLE);
     };
-    fetchRegistryData();
-    const interval = setInterval(fetchRegistryData, 30000); // Live refresh every 30s
-    return () => clearInterval(interval);
+
+    const refresh = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const [statsData, recentData] = await Promise.all([
+          registryFetch(`${FIRESTORE_DOCS}/stats/global?key=${FIREBASE_CONFIG.apiKey}`),
+          registryFetch(`${FIRESTORE_DOCS}/slop_registry?key=${FIREBASE_CONFIG.apiKey}&pageSize=5&orderBy=last_updated desc`)
+        ]);
+        const entry = { savedAt: Date.now(), ...parseStatsDoc(statsData), wallOfShame: parseRecentDocs(recentData) };
+        writeStatsCache(entry);
+        applyEntry(entry);
+        setRegistryNotice(null);
+      } catch (e) {
+        console.error("ZeroSlop: Failed to fetch live stats", e);
+        // Keep showing the last good data; record the attempt so other tabs don't retry at once.
+        const cached = readStatsCache();
+        writeStatsCache({ ...(cached || {}), savedAt: Date.now(), unavailable: true });
+        setRegistryNotice(REGISTRY_UNAVAILABLE);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const refreshIfDue = () => {
+      if (document.visibilityState === 'hidden') return;
+      const cached = readStatsCache();
+      if (cached && Date.now() - cached.savedAt < STATS_REFRESH_MS) {
+        applyEntry(cached); // another tab (or an earlier visit) fetched recently
+        return;
+      }
+      refresh();
+    };
+
+    const cached = readStatsCache();
+    if (cached) applyEntry(cached);
+    refreshIfDue();
+
+    const interval = setInterval(refreshIfDue, STATS_REFRESH_MS);
+    document.addEventListener('visibilitychange', refreshIfDue);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshIfDue);
+    };
+  }, []);
+
+  // ?search=handle opens that handle's network map. Reads the full registry once, on load.
+  useEffect(() => {
+    const searchVal = new URLSearchParams(window.location.search).get('search');
+    if (!searchVal) return;
+    const handle = '@' + searchVal;
+    setSearchQuery(handle);
+    loadAllCollections().then(({ susp }) => {
+      const realAmps = susp.filter(s => (s.fields.factory_handle?.stringValue || "").toLowerCase().replace('@', '') === searchVal.toLowerCase());
+      setActiveMapHandle(handle);
+      setActiveMapAmplifiers(realAmps.map(s => ({ handle: s.fields.handle?.stringValue, type: "Caught Amplifying", rep: 10 })));
+    }).catch(() => { /* notice is already shown */ });
   }, []);
 
   const handleSearch = async (e) => {
     const query = e.target.value.toLowerCase();
     setSearchQuery(query);
+    latestQueryRef.current = query;
     if (!query) { setSearchResults([]); setActiveMapHandle(null); return; }
-    
-    if (allDocs.length === 0) {
-      const [reg, acc, susp] = await Promise.all([fetchAllPages('slop_registry'), fetchAllPages('slop_accounts'), fetchAllPages('suspicious_accounts')]);
-      setAllDocs(reg); setAllAccounts(acc); setAllSuspicious(susp);
+
+    let data;
+    try {
+      data = await loadAllCollections();
+    } catch {
+      return; // notice is already shown
     }
+    if (latestQueryRef.current !== query) return; // a newer keystroke has taken over
 
     const handleMap = {};
-    [...allDocs, ...allAccounts, ...allSuspicious].forEach(doc => {
+    [...data.reg, ...data.acc, ...data.susp].forEach(doc => {
       const handle = doc.fields.author_handle?.stringValue || doc.fields.handle?.stringValue;
       if (handle && handle.toLowerCase().includes(query.replace('@', ''))) {
         if (!handleMap[handle]) { handleMap[handle] = { handle, scores: [], count: 0 }; }
@@ -382,7 +471,7 @@ function App() {
                 <div className="wall-pfp">{slop.pfp.startsWith('http') ? <img src={slop.pfp} alt="pfp" style={{ width: '100%', height: '100%', borderRadius: '50%' }} /> : slop.pfp}</div>
                 <div className="wall-info"><div className="wall-name">{slop.name}</div><div className="wall-handle">{slop.handle}</div><div className="wall-score">{slop.score}% AI</div></div>
               </div>
-            )) : <div style={{ padding: '20px', color: '#71767b', textAlign: 'center', width: '100%' }}>Loading slop reports...</div>}
+            )) : <div style={{ padding: '20px', color: '#71767b', textAlign: 'center', width: '100%' }}>{registryNotice || "Loading slop reports..."}</div>}
           </div>
         </section>
         <section id="installation">
@@ -406,7 +495,13 @@ function App() {
               <button onClick={async () => {
                   const pass = prompt("Enter researcher password to unlock download:");
                   if (pass === "zeroslop-research-2026") {
-                    const [reg, acc, susp] = await Promise.all([fetchAllPages('slop_registry'), fetchAllPages('slop_accounts'), fetchAllPages('suspicious_accounts')]);
+                    let reg, acc, susp;
+                    try {
+                      ({ reg, acc, susp } = await loadAllCollections());
+                    } catch {
+                      alert(REGISTRY_UNAVAILABLE);
+                      return;
+                    }
                     const escapeCSV = (str) => { if (!str) return '""'; const clean = str.toString().replace(/"/g, '""').replace(/\n/g, ' '); return `"${clean}"`; };
                     
                     const ORGANIC_GUARD_RULES = [
@@ -501,6 +596,9 @@ function App() {
             </div>
           )}
         </div>
+        {registryNotice && (
+          <div role="status" className="registry-notice">{registryNotice}</div>
+        )}
         <div className="trending-box">
           <div className="trending-title">Slop Trends (Last 7 Days)</div>
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '60px', padding: '10px 5px 0' }}>
@@ -508,7 +606,7 @@ function App() {
           </div>
           <div style={{ fontSize: '0.75rem', color: '#71767b', padding: '5px 10px', textAlign: 'center' }}>Daily slop detections are {trends.length >= 7 && trends[6][1] > trends[5][1] ? 'up' : 'down'} today</div>
         </div>
-        <div className="slop-counter-box"><div className="counter-label">COMMUNITY GOAL: {GOAL}</div><div style={{ width: '100%', background: '#333', borderRadius: '9999px', height: '8px', margin: '8px 0' }}><div style={{ width: `${Math.min(((stats.rawCount || 0) / GOAL) * 100, 100)}%`, background: '#1d9bf0', height: '100%', borderRadius: '9999px' }}></div></div><div className="counter-label" style={{ marginTop: '16px' }}>TOTAL SLOP DETECTED</div><div className="counter-value">{stats.count}</div><div className="counter-sub">Across {stats.accounts} accounts</div></div>
+        <div className="slop-counter-box"><div className="counter-label">COMMUNITY GOAL: {GOAL}</div><div style={{ width: '100%', background: '#333', borderRadius: '9999px', height: '8px', margin: '8px 0' }}><div style={{ width: `${Math.min(((stats.rawCount || 0) / GOAL) * 100, 100)}%`, background: '#1d9bf0', height: '100%', borderRadius: '9999px' }}></div></div><div className="counter-label" style={{ marginTop: '16px' }}>TOTAL SLOP DETECTED</div><div className="counter-value">{registryNotice && stats.count === "..." ? "—" : stats.count}</div><div className="counter-sub">{registryNotice && stats.accounts === "..." ? "Unavailable right now" : `Across ${stats.accounts} accounts`}</div></div>
         <div className="trending-box"><div className="trending-title">Project Stats</div><div className="trending-item"><div className="trending-category">Trending in Tech</div><div className="trending-name">#ZeroSlop</div><div className="trending-count">Live Community Data</div></div><div className="trending-item"><div className="trending-category">API Status</div><div className="trending-name">ZeroGPT Online</div><div className="trending-count">Latency: 240ms</div></div></div>
         <div className="trending-box"><div className="trending-title">Support</div><div className="trending-item" style={{ cursor: 'default' }}><div className="trending-category">Official Coin</div><div className="trending-name">Contract Address (CA)</div><div className="trending-count" style={{ wordBreak: 'break-all', fontSize: '0.75rem', marginBottom: '8px' }}>CNuZoaZkeVTkcqxeXdeDWKcx9217AgvuqQz9xv5dpump</div><button onClick={() => { navigator.clipboard.writeText('CNuZoaZkeVTkcqxeXdeDWKcx9217AgvuqQz9xv5dpump'); alert('Contract Address copied to clipboard!'); }} style={{ background: 'var(--twitter-blue)', color: 'white', border: 'none', borderRadius: '9999px', padding: '4px 12px', fontSize: '0.8rem', fontWeight: 'bold', cursor: 'pointer' }}>Copy CA</button></div></div>
       </aside>
