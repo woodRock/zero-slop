@@ -18,6 +18,13 @@ ZeroSlop goes beyond binary AI detection. We categorize accounts based on their 
 - **Heuristic Highlighting**: Real-time, local scanning that highlights "Extraction Hooks" (Thread 🧵, "Save for later," "$0 to $10k") in red ink directly on your timeline.
 - **Precision Reporting**: A multi-dimensional reporting drawer that lets you categorize slop types and perform the "Extraction Test" (Accountability, Funnel, Replicability).
 
+### 🖼️ On-device Image Check
+- Right-click any post with a photo or video and choose **ZeroSlop → Check this post’s image or video**. ZeroSlop picks the media nearest to where you clicked.
+- **Quick check:** the [Community Forensics](https://huggingface.co/buildborderless/CommunityForensics-DeepfakeDet-ViT) detector (87 MB, trained on images from 4,800+ generators) gives a score for how likely the image is AI-generated, usually in under a second. It runs on your computer (WebGPU, or the CPU if WebGPU isn't available), and the image is never uploaded. Videos are scored using their preview image plus the frame currently showing.
+- **Saved and shared:** results are saved on your computer, so labels come back when you revisit a post. Scores (not images) go to the community registry, so other users see a label on likely-AI media (50%+) as they scroll. Anyone can vote on whether a score looks right.
+- **Explain why (optional):** Gemma 4 E2B (3.4 GB, downloadable from the popup) describes the signs it sees and reads AI watermarks. Its explanations stay on your device.
+- Scores are a hint, not proof. Detectors struggle with screenshots and heavily compressed images.
+
 ### 🫰 Cinematic 'Zap' Mode
 - Choose to **Blur** or **Zap** slop from your timeline.
 - **The Snap**: When set to Zap, slop tweets disintegrate into ash with a cinematic horizontal-sweep "Thanos Snap" animation before being physically removed from the DOM.
@@ -51,13 +58,16 @@ ZeroSlop is built for performance and privacy:
 4. Click **Load unpacked** and select the `dist/` folder.
 
 ### Build from Source
+`dist/` is what the browser loads. Edit the files in the project root, then rebuild:
 ```bash
-# Install dependencies (optional, for testing)
-npm install
+# Install dependencies (includes transformers.js, which is bundled for the image check)
+npm install --legacy-peer-deps
 
-# Create release package manually
-cd dist
-zip -r ../zero-slop-VERSION.zip manifest.json background.js content.js classifier.js popup.html popup.js model_weights.json icons/
+# Copy sources and the bundled model runtime into dist/
+npm run build
+
+# Or rebuild automatically while editing
+npm run build:watch
 ```
 
 ## 📦 Chrome Web Store Submission
@@ -67,8 +77,9 @@ To submit a new version to the Chrome Web Store:
 1. **Update version** in `manifest.json` and `package.json`
 2. **Create ZIP package:**
    ```bash
+   npm run build
    cd dist
-   zip -r ../zero-slop-VERSION.zip manifest.json background.js content.js classifier.js popup.html popup.js model_weights.json icons/
+   zip -r ../zero-slop-VERSION.zip manifest.json background.js content.js classifier.js popup.html popup.js offscreen.html offscreen.js model_weights.json icons/ vendor/
    ```
 3. **Upload** to [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole)
 4. **Deploy Firestore rules:**

@@ -1,6 +1,6 @@
 {
   "name": "zero-slop",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "ZeroGPT Tweet Checker Chrome Extension",
   "main": "background.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "build:watch": "node build.js --watch"
   },
   "devDependencies": {
+    "@huggingface/transformers": "4.3.2",
     "jest": "^29.7.0",
     "jest-chrome": "^0.8.0",
     "jest-environment-jsdom": "^29.7.0"

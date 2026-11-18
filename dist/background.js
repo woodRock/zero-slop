@@ -23,6 +23,15 @@ chrome.runtime.onInstalled.addListener(() => {
       contexts: ["all"]
     });
 
+    // Sub-item: Check Image (on-device model). Shown anywhere on the page, because X covers
+    // images with overlays, so right-clicking a photo rarely counts as an "image" click.
+    chrome.contextMenus.create({
+      id: "checkImage",
+      parentId: "zeroSlopParent",
+      title: "🖼️ Check this post’s image or video",
+      contexts: ["all"]
+    });
+
     // Sub-item: Check Thread
     chrome.contextMenus.create({
       id: "checkThread",
@@ -72,6 +81,11 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         }
       });
     }
+  } else if (info.menuItemId === "checkImage") {
+    chrome.tabs.sendMessage(tab.id, { action: "getMediaInfo", srcUrl: info.srcUrl || null }, (media) => {
+      if (chrome.runtime.lastError) return;
+      requestImageDetect(tab.id, media);
+    });
   } else if (info.menuItemId === "checkThread") {
     chrome.tabs.sendMessage(tab.id, { action: "getThreadText" }, (response) => {
       if (response && response.text) {
@@ -135,6 +149,289 @@ function scanAmplifiers(tweetId) {
   chrome.tabs.create({ url: quoteUrl, active: false });
   chrome.tabs.create({ url: retweetUrl, active: false });
 }
+
+// ---------------------------------------------------------------------------
+// On-device image check (runs Gemma 4 in an offscreen document, see offscreen.js)
+// ---------------------------------------------------------------------------
+
+const IMAGE_MODEL_SIZE = "3.4 GB";
+const DETECTOR_SIZE = "87 MB";
+const DETECTOR_MODEL = "buildborderless/CommunityForensics-DeepfakeDet-ViT";
+const FIRESTORE_DB = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)`;
+const firestoreUrl = (path) => `${FIRESTORE_DB}/${path}?key=${FIREBASE_CONFIG.apiKey}`;
+const firestoreDoc = (path) => `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/${path}`;
+const IMAGE_CACHE_LIMIT = 500;
+const imageRegistryCache = new Map(); // mediaId -> { data, timestamp }
+
+// Image registry document IDs come from X's CDN path, e.g. "media_ABC123". Reject anything else.
+function validMediaId(id) {
+  return typeof id === "string" && /^[A-Za-z0-9_.-]{3,300}$/.test(id) && id !== "." && id !== "..";
+}
+
+async function requestImageDetect(tabId, media) {
+  if (!media || !media.url || !validMediaId(media.mediaId)) {
+    chrome.tabs.sendMessage(tabId, { action: "imageCheckError", mode: "detect", code: "no-image", message: "No photo or video was found in that post." });
+    return;
+  }
+  const requestId = crypto.randomUUID();
+  const { detectorReady } = await chrome.storage.local.get(["detectorReady"]);
+  chrome.tabs.sendMessage(tabId, { action: "imageCheckStatus", mode: "detect", requestId, tweetId: media.tweetId || null, stage: detectorReady ? "analyzing" : "starting", size: DETECTOR_SIZE });
+  try {
+    await ensureOffscreenDocument();
+    await sendToOffscreen({
+      type: "detectImage", requestId, tabId, url: media.url, frames: (media.frames || []).slice(0, 4),
+      tweetId: media.tweetId || null, mediaId: media.mediaId, kind: media.kind || "image", author: media.author || null
+    });
+  } catch (e) {
+    console.error("ZeroSlop: Could not start the image detector", e);
+    chrome.tabs.sendMessage(tabId, { action: "imageCheckError", mode: "detect", requestId, code: "failed", message: "The image detector couldn’t start." });
+  }
+}
+
+function parseImageDoc(doc) {
+  const f = doc.fields || {};
+  const num = (v) => Number(v?.doubleValue ?? v?.integerValue ?? 0);
+  const checks = num(f.checks);
+  return {
+    checks,
+    scoreSum: num(f.score_sum),
+    avg: checks ? Math.round(num(f.score_sum) / checks) : Math.round(num(f.ai_score)),
+    upvotes: num(f.upvotes),
+    downvotes: num(f.downvotes),
+    kind: f.kind?.stringValue || "image",
+    model: f.model?.stringValue || ""
+  };
+}
+
+/** Look up image results in the community registry. Returns { mediaId: entry } for those found. */
+async function getImageRegistry(mediaIds, { fresh = false } = {}) {
+  const ids = [...new Set(mediaIds.filter(validMediaId))].slice(0, 20);
+  const result = {};
+  const missing = [];
+  for (const id of ids) {
+    const cached = imageRegistryCache.get(id);
+    const ttl = cached?.data ? 6 * 60 * 60 * 1000 : 60 * 60 * 1000;
+    if (!fresh && cached && Date.now() - cached.timestamp < ttl) {
+      if (cached.data) result[id] = cached.data;
+    } else {
+      missing.push(id);
+    }
+  }
+  if (!missing.length) return result;
+  try {
+    const response = await fetch(firestoreUrl("documents:batchGet"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ documents: missing.map((id) => firestoreDoc(`image_registry/${id}`)) })
+    });
+    if (!response.ok) return result;
+    const rows = await response.json();
+    for (const row of rows) {
+      const name = row.found?.name || row.missing || "";
+      const id = name.split("/").pop();
+      const data = row.found ? parseImageDoc(row.found) : null;
+      imageRegistryCache.set(id, { data, timestamp: Date.now() });
+      if (data) result[id] = data;
+    }
+  } catch (e) {
+    console.error("ZeroSlop: Image registry lookup failed", e);
+  }
+  return result;
+}
+
+async function storeImageResult(msg) {
+  const { mediaId, url, tweetId, kind, author, result } = msg;
+  const fields = {
+    media_id: { stringValue: mediaId },
+    media_url: { stringValue: url || "" },
+    kind: { stringValue: kind || "image" },
+    ai_score: { doubleValue: result.score },
+    model: { stringValue: result.model || DETECTOR_MODEL },
+    last_checked: { timestampValue: new Date().toISOString() }
+  };
+  if (tweetId) fields.tweet_id = { stringValue: tweetId };
+  if (author) fields.author_handle = { stringValue: author };
+
+  const name = firestoreDoc(`image_registry/${mediaId}`);
+  const body = {
+    writes: [
+      // Mask: only touch these fields, so votes and counts are kept.
+      { update: { name, fields }, updateMask: { fieldPaths: Object.keys(fields) } },
+      {
+        transform: {
+          document: name,
+          fieldTransforms: [
+            { fieldPath: "checks", increment: { integerValue: 1 } },
+            { fieldPath: "score_sum", increment: { doubleValue: result.score } }
+          ]
+        }
+      }
+    ]
+  };
+  try {
+    const response = await fetch(firestoreUrl("documents:commit"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!response.ok) console.error("ZeroSlop: Image registry write failed", await response.text());
+  } catch (e) {
+    console.error("ZeroSlop: Image registry write failed", e);
+  }
+}
+
+async function voteImage(mediaId, voteType) {
+  if (!validMediaId(mediaId)) return;
+  const body = {
+    writes: [{
+      transform: {
+        document: firestoreDoc(`image_registry/${mediaId}`),
+        fieldTransforms: [{ fieldPath: voteType === "up" ? "upvotes" : "downvotes", increment: { integerValue: 1 } }]
+      }
+    }]
+  };
+  try {
+    await fetch(firestoreUrl("documents:commit"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    imageRegistryCache.delete(mediaId);
+  } catch (e) {
+    console.error("ZeroSlop: Image vote failed", e);
+  }
+}
+
+/** Keep this computer's results so posts are re-labelled after a refresh. */
+async function saveImageResultLocally(msg) {
+  const { imageCheckCache = {} } = await chrome.storage.local.get(["imageCheckCache"]);
+  imageCheckCache[msg.mediaId] = {
+    score: msg.result.score,
+    kind: msg.kind || "image",
+    model: msg.result.model || DETECTOR_MODEL,
+    framesChecked: msg.result.framesChecked || 1,
+    tweetId: msg.tweetId || null,
+    checkedAt: Date.now()
+  };
+  const ids = Object.keys(imageCheckCache);
+  if (ids.length > IMAGE_CACHE_LIMIT) {
+    ids.sort((a, b) => imageCheckCache[a].checkedAt - imageCheckCache[b].checkedAt)
+      .slice(0, ids.length - IMAGE_CACHE_LIMIT)
+      .forEach((id) => delete imageCheckCache[id]);
+  }
+  await chrome.storage.local.set({ imageCheckCache });
+}
+
+async function handleImageDetectResult(msg) {
+  // Include this check in the community numbers shown on the result card.
+  const before = (await getImageRegistry([msg.mediaId], { fresh: true }))[msg.mediaId];
+  const checks = (before?.checks || 0) + 1;
+  const avg = Math.round(((before?.scoreSum || 0) + msg.result.score) / checks);
+  const community = { checks, avg, upvotes: before?.upvotes || 0, downvotes: before?.downvotes || 0 };
+
+  await saveImageResultLocally(msg);
+  chrome.tabs.sendMessage(msg.tabId, {
+    action: "imageDetectResult", requestId: msg.requestId, tweetId: msg.tweetId, url: msg.url,
+    mediaId: msg.mediaId, kind: msg.kind, result: msg.result, community
+  }).catch(() => {});
+
+  await storeImageResult(msg);
+  imageRegistryCache.set(msg.mediaId, { data: { ...community, scoreSum: (before?.scoreSum || 0) + msg.result.score, kind: msg.kind, model: msg.result.model }, timestamp: Date.now() });
+}
+
+async function startImageCheck(tabId, requestId, url, tweetId, modelReady) {
+  chrome.tabs.sendMessage(tabId, { action: "imageCheckStatus", requestId, tweetId, stage: modelReady ? "loading" : "starting", size: IMAGE_MODEL_SIZE });
+  try {
+    await ensureOffscreenDocument();
+    await sendToOffscreen({ type: "checkImage", requestId, tabId, url, tweetId });
+  } catch (e) {
+    console.error("ZeroSlop: Could not start the image model", e);
+    chrome.tabs.sendMessage(tabId, { action: "imageCheckError", requestId, tweetId, code: "failed", message: "The image model couldn’t start." });
+  }
+}
+
+async function ensureOffscreenDocument() {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"] });
+  if (contexts.length > 0) return;
+  try {
+    await chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["WORKERS"],
+      justification: "Runs the on-device AI image check with WebGPU."
+    });
+  } catch (e) {
+    if (!String(e?.message || e).includes("single offscreen")) throw e;
+  }
+}
+
+async function sendToOffscreen(message) {
+  // The offscreen page needs a moment to load its module before it can receive messages.
+  for (let attempt = 0; attempt < 50; attempt++) {
+    try {
+      await chrome.runtime.sendMessage({ target: "offscreen", ...message });
+      return;
+    } catch (e) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  throw new Error("The offscreen image model did not respond.");
+}
+
+// Messages from the offscreen model page and from the image-check card on the page.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg?.target === "background") {
+    if (msg.type === "detectorReady") {
+      chrome.storage.local.set({ detectorReady: true });
+      return;
+    }
+    if (msg.type === "imageDetectResult" && msg.tabId && validMediaId(msg.mediaId)) {
+      handleImageDetectResult(msg);
+      return;
+    }
+    if (msg.type === "modelReady") {
+      const update = { imageModelReady: true, imageModelConsent: true };
+      if (msg.dtype) update.imageModelDtype = msg.dtype;
+      chrome.storage.local.set(update);
+      chrome.storage.local.remove("imageModelDownload");
+    } else if (msg.type === "modelProgress") {
+      // Shown by the popup's image-check section, even after the popup was closed and reopened.
+      chrome.storage.local.set({ imageModelDownload: { stage: msg.stage, progress: msg.progress ?? 0, loaded: msg.loaded ?? 0, total: msg.total ?? 0, updatedAt: Date.now() } });
+    } else if (msg.type === "modelError") {
+      chrome.storage.local.set({ imageModelDownload: { stage: "error", code: msg.code, message: msg.message, updatedAt: Date.now() } });
+    } else if (msg.type === "offscreenIdle") {
+      chrome.offscreen.closeDocument().catch(() => {});
+    } else if (["imageCheckStatus", "imageCheckResult", "imageCheckError"].includes(msg.type) && msg.tabId) {
+      const { target, type, ...rest } = msg;
+      chrome.tabs.sendMessage(msg.tabId, { ...rest, action: type, size: IMAGE_MODEL_SIZE }).catch(() => {});
+    }
+    return;
+  }
+  if (msg?.action === "downloadImageModel") {
+    // From the popup: download the model now instead of on the first image check.
+    chrome.storage.local.set({ imageModelConsent: true, imageModelDownload: { stage: "starting", progress: 0, updatedAt: Date.now() } });
+    ensureOffscreenDocument()
+      .then(() => sendToOffscreen({ type: "preloadModel" }))
+      .catch((e) => {
+        console.error("ZeroSlop: Could not start the model download", e);
+        chrome.storage.local.set({ imageModelDownload: { stage: "error", code: "failed", message: "The image model couldn’t start.", updatedAt: Date.now() } });
+      });
+    return;
+  }
+  if (msg?.action === "removeImageModel") {
+    // From the popup: unload the model so the deleted files aren't still held in memory.
+    chrome.offscreen.closeDocument().catch(() => {});
+    chrome.storage.local.remove("imageModelDownload");
+    return;
+  }
+  if (msg?.action === "checkImageRegistry") {
+    getImageRegistry(msg.mediaIds || []).then((entries) => sendResponse(entries)).catch(() => sendResponse({}));
+    return true;
+  }
+  if (msg?.action === "voteImage") {
+    voteImage(msg.mediaId, msg.voteType);
+    return;
+  }
+  if (msg?.action === "explainImage" && sender.tab) {
+    // Clicking "Explain (3.4 GB download)" is the consent to download Gemma.
+    chrome.storage.local.get(["imageModelReady"]).then(({ imageModelReady }) => {
+      chrome.storage.local.set({ imageModelConsent: true });
+      startImageCheck(sender.tab.id, crypto.randomUUID(), msg.url, msg.tweetId || null, !!imageModelReady);
+    });
+    return;
+  }
+});
 
 // Account shield type -> content-script message that labels the account
 const SHIELD_ACTIONS = {

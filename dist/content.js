@@ -17,8 +17,11 @@ const NON_PROFILE_PATHS = ['home', 'explore', 'notifications', 'messages', 'sear
 let lastRightClickedElement = null;
 let currentOverlayInfo = null;
 
+let lastRightClickPoint = null;
+
 document.addEventListener('contextmenu', (event) => {
   lastRightClickedElement = event.target;
+  lastRightClickPoint = { x: event.clientX, y: event.clientY };
 }, true);
 
 // ---------------------------------------------------------------------------
@@ -36,11 +39,14 @@ const zsSettings = {
   hideThreshold: 85
 };
 
+let zsImageCache = {}; // mediaId -> this computer's image check result (saved by the background script)
+
 const zsSettingsReady = new Promise((resolve) => {
-  chrome.storage.local.get(Object.keys(zsSettings), (stored) => {
+  chrome.storage.local.get([...Object.keys(zsSettings), 'imageCheckCache'], (stored) => {
     for (const key of Object.keys(zsSettings)) {
       if (stored[key] !== undefined) zsSettings[key] = stored[key];
     }
+    zsImageCache = stored.imageCheckCache || {};
     resolve();
   });
 });
@@ -59,6 +65,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   if (changes.profileAlerts && !changes.profileAlerts.newValue) {
     document.querySelectorAll('.zs-toast[data-notice]').forEach(n => n.remove());
   }
+  if (changes.imageCheckCache) zsImageCache = changes.imageCheckCache.newValue || {};
 });
 
 // ---------------------------------------------------------------------------
@@ -182,6 +189,12 @@ const ZS_STYLES = `
   .zs-confirm { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; font-weight: 600;
     color: var(--zs-green); background: color-mix(in srgb, var(--zs-green) 12%, transparent); }
   .zs-loading { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+  .zs-media-picked { outline: 3px solid var(--zs-accent) !important; outline-offset: -3px; transition: outline-color .3s ease; }
+  .zs-signs { margin: 10px 0 0; padding-left: 18px; font-size: 13px; }
+  .zs-signs li { margin: 3px 0; }
+  .zs-note { font-size: 12px; color: var(--zs-muted); margin: 12px 0 0; }
+  .zs-flag { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    color: var(--zs-tone); background: color-mix(in srgb, var(--zs-tone) 12%, transparent); }
   .zs-spinner { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--zs-border); border-top-color: var(--zs-accent); animation: zsSpin .8s linear infinite; flex: none; }
 
   /* Hunter Vision highlights: noticeable without shouting */
@@ -503,7 +516,7 @@ document.addEventListener('pointerdown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (zsPopover) { closePopover({ restoreFocus: true }); return; }
-  document.getElementById('zs-result-card')?.remove();
+  closeResultCard();
 });
 window.addEventListener('scroll', (e) => {
   if (zsPopover && !zsPopover.contains(e.target)) closePopover();
@@ -717,6 +730,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'showOrganicSuccess':
       applyAccountStatus('organic', request.handle);
       break;
+    case 'getMediaInfo':
+      sendResponse(findMediaInfo(request.srcUrl));
+      break;
+    case 'imageCheckStatus':
+      showImageCard({ state: 'progress', ...request });
+      break;
+    case 'imageCheckResult':
+      showExplainResult(request);
+      break;
+    case 'imageDetectResult':
+      showDetectResult(request);
+      break;
+    case 'imageCheckError':
+      showImageCard({ state: 'error', ...request });
+      break;
   }
   return true;
 });
@@ -731,7 +759,7 @@ function handleResult(request) {
   if (!request.isAutoScan) {
     if (!hasScore) {
       // Confirmation only, e.g. "Reported to ZeroSlop Registry".
-      document.getElementById('zs-result-card')?.remove();
+      closeResultCard();
       zsToast(message || 'Done', { tone: 'green' });
       return;
     }
@@ -937,6 +965,7 @@ function zapPost(container, reason) {
 
 function scanArticle(container) {
   highlightSlopMarkers(container);
+  applyStoredImageResults(container);
   const info = extractTweetInfo(container);
 
   // Layer 3: Smart Slop Guard (on-device model)
@@ -1549,8 +1578,16 @@ function autoCloseCard(card, delay = 4000) {
   arm();
 }
 
+/** Close the open card. An image check in progress keeps running and reports back with a toast. */
+function closeResultCard() {
+  const card = document.getElementById('zs-result-card');
+  if (!card) return;
+  if (card.dataset.requestId) dismissedImageChecks.add(card.dataset.requestId);
+  card.remove();
+}
+
 function showResultCard({ state, pct = 0, words, scope = 'tweet', info, message }) {
-  document.getElementById('zs-result-card')?.remove();
+  closeResultCard();
 
   const tone = state === 'error' ? 'red' : state === 'loading' ? 'blue' : scoreTone(pct);
   const card = el('section', {
@@ -1649,6 +1686,474 @@ function showResultCard({ state, pct = 0, words, scope = 'tweet', info, message 
 
   if (stack.childNodes.length) card.appendChild(stack);
   document.body.appendChild(card);
+}
+
+// ---------------------------------------------------------------------------
+// On-device image check (right-click a post → ZeroSlop → Check this post’s image or video)
+// ---------------------------------------------------------------------------
+
+const IMAGE_VERDICTS = {
+  likely_ai: { tone: 'amber', title: 'Likely AI-generated', label: 'AI image?' },
+  unclear: { tone: 'gray', title: 'Hard to tell', label: 'Image unclear' },
+  likely_real: { tone: 'green', title: 'Looks like a real image', label: 'Image looks real' }
+};
+const dismissedImageChecks = new Set();
+
+const isCdnImage = (u) => typeof u === 'string' && /^https:\/\/pbs\.twimg\.com\//.test(u);
+const mediaLabels = new Map(); // image URL -> "image 2 of 3", shown on the result card
+
+/** Ask X's CDN for the medium size, which is big enough for the model without being slow. */
+function mediumSize(url) {
+  try {
+    const u = new URL(url);
+    if (u.searchParams.has('name')) u.searchParams.set('name', 'medium');
+    return u.href;
+  } catch (e) {
+    return url;
+  }
+}
+
+function backgroundImageUrl(node) {
+  const match = node && getComputedStyle(node).backgroundImage.match(/url\("?([^")]+)"?\)/);
+  return match ? match[1] : null;
+}
+
+/** Every photo, video and link-preview image in a post, in reading order. */
+function collectPostMedia(article) {
+  const items = [];
+  const seen = new Set();
+  const add = (node, url, kind) => {
+    if (!isCdnImage(url) || seen.has(url)) return;
+    seen.add(url);
+    // Media inside a quoted post sits in a nested link card.
+    const quoted = !!node.closest('div[role="link"]') && node.closest('div[role="link"]') !== article;
+    items.push({ node, url, kind, quoted });
+  };
+
+  article.querySelectorAll('video').forEach((video) => {
+    const box = video.closest('[data-testid="videoPlayer"], [data-testid="videoComponent"]') || video.parentElement;
+    const poster = isCdnImage(video.poster) ? video.poster : box?.querySelector('img')?.src;
+    add(box || video, poster, 'video');
+    if (items.length && items[items.length - 1].url === poster) items[items.length - 1].video = video;
+  });
+  article.querySelectorAll('[data-testid="tweetPhoto"]').forEach((photo) => {
+    if (photo.querySelector('video')) return; // Already counted as a video.
+    const img = photo.querySelector('img');
+    add(photo, img?.src || backgroundImageUrl(photo.querySelector('div[style*="background-image"]')), 'image');
+  });
+  article.querySelectorAll('[data-testid^="card.layout"] img').forEach((img) => add(img.closest('[data-testid^="card.layout"]') || img, img.src, 'image'));
+
+  // Keep document order so "image 2 of 3" matches what's on screen.
+  items.sort((a, b) => (a.node.compareDocumentPosition(b.node) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+  return items;
+}
+
+/** Pick the media item under (or nearest to) the right-click, preferring the post's own media over a quoted post's. */
+function pickMedia(items, point) {
+  const own = items.filter((m) => !m.quoted);
+  const pool = own.length ? own : items;
+  if (!point) return pool[0];
+  let best = null;
+  let bestDist = Infinity;
+  for (const m of items) {
+    const r = m.node.getBoundingClientRect();
+    const inside = point.x >= r.left && point.x <= r.right && point.y >= r.top && point.y <= r.bottom;
+    if (inside) return m; // Right-clicked on it directly (including a quoted post's media).
+    if (!pool.includes(m)) continue;
+    const dx = Math.max(r.left - point.x, 0, point.x - r.right);
+    const dy = Math.max(r.top - point.y, 0, point.y - r.bottom);
+    const dist = Math.hypot(dx, dy);
+    if (dist < bestDist) { bestDist = dist; best = m; }
+  }
+  return best || pool[0];
+}
+
+function flashPicked(node) {
+  if (!node) return;
+  node.classList.add('zs-media-picked');
+  setTimeout(() => node.classList.remove('zs-media-picked'), 1600);
+}
+
+/** Find the photo or video to check for the post the user right-clicked. */
+function findMediaInfo(srcUrl) {
+  const target = lastRightClickedElement;
+  const article = getTweetContainer(target);
+  const info = article ? extractTweetInfo(article) : null;
+  const tweetId = info && !String(info.tweetId).startsWith('local-') ? info.tweetId : null;
+
+  if (article) {
+    const items = collectPostMedia(article);
+    // The browser told us exactly which image was right-clicked.
+    const sizeless = (u) => { try { const x = new URL(u); x.searchParams.delete('name'); return x.href; } catch (e) { return u; } };
+    let picked = isCdnImage(srcUrl) ? items.find((m) => sizeless(m.url) === sizeless(srcUrl)) : null;
+    if (!picked && items.length) picked = pickMedia(items, lastRightClickPoint);
+    if (picked) {
+      // Count within the same post (own media vs the quoted post's) and the same kind.
+      const sameKind = items.filter((m) => m.kind === picked.kind && m.quoted === picked.quoted);
+      const label = sameKind.length > 1 ? `${picked.kind} ${sameKind.indexOf(picked) + 1} of ${sameKind.length}` : picked.kind;
+      const url = mediumSize(picked.url);
+      mediaLabels.set(url, picked.quoted ? `${label} in the quoted post` : label);
+      flashPicked(picked.node);
+      const frame = picked.kind === 'video' ? captureVideoFrame(picked.video) : null;
+      return {
+        url, tweetId, kind: picked.kind, mediaId: mediaIdFromUrl(url),
+        author: info?.author?.handle && info.author.handle !== '@anonymous' ? info.author.handle : null,
+        frames: frame ? [frame] : []
+      };
+    }
+  }
+
+  // Outside a post (for example the full-screen photo viewer): use what's under the cursor.
+  let url = isCdnImage(srcUrl) ? srcUrl : null;
+  if (!url && target && target.closest) {
+    const img = target.closest('img') || target.closest('[data-testid="tweetPhoto"]')?.querySelector('img');
+    if (img && isCdnImage(img.src)) url = img.src;
+    const video = target.closest('video') || target.closest('[data-testid="videoPlayer"]')?.querySelector('video');
+    if (!url && video && isCdnImage(video.poster)) url = video.poster;
+  }
+  if (!url) return { url: null, tweetId };
+  url = mediumSize(url);
+  mediaLabels.set(url, 'image');
+  return { url, tweetId, kind: 'image', mediaId: mediaIdFromUrl(url), author: null, frames: [] };
+}
+
+function imageCardShell(requestId, tone) {
+  const existing = document.getElementById('zs-result-card');
+  if (existing && existing.dataset.requestId !== (requestId || '')) closeResultCard();
+  else existing?.remove();
+  const card = el('section', {
+    id: 'zs-result-card',
+    class: `zs-surface zs-card zs-tone-${tone}`,
+    role: 'dialog',
+    'aria-label': 'ZeroSlop image check',
+    'aria-live': 'polite',
+    'data-request-id': requestId || ''
+  });
+  ['click', 'mousedown', 'pointerdown'].forEach((t) => card.addEventListener(t, (e) => e.stopPropagation()));
+  card.appendChild(el('div', { class: 'zs-card-head' }, [
+    el('span', { class: 'zs-eyebrow', text: 'ZeroSlop · Image check' }),
+    el('button', {
+      type: 'button', class: 'zs-icon-btn', 'aria-label': 'Close',
+      onclick: () => { if (requestId) dismissedImageChecks.add(requestId); card.remove(); }
+    }, '×')
+  ]));
+  return card;
+}
+
+const IMAGE_STAGE_TEXT = {
+  // Gemma 4 explanation
+  starting: ['Starting Gemma 4…', 'This runs entirely on your computer.'],
+  downloading: ['Downloading Gemma 4…', 'One-time download. You can keep browsing.'],
+  loading: ['Loading Gemma 4…', 'This takes a little longer the first time after a restart.'],
+  analyzing: ['Explaining the image…', 'Looking for AI artifacts and watermarks.']
+};
+const DETECT_STAGE_TEXT = {
+  starting: ['Starting the AI-image detector…', 'The first check downloads it once (87 MB).'],
+  downloading: ['Downloading the detector…', 'One-time download.'],
+  loading: ['Loading the detector…', 'Almost ready.'],
+  analyzing: ['Checking the image…', 'Usually under a second.']
+};
+
+function sizeText(bytes) {
+  return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
+}
+
+function showImageCard(opts) {
+  const { state, requestId } = opts;
+  if (requestId && dismissedImageChecks.has(requestId) && state === 'progress') return;
+
+  // Progress updates arrive often: update the open card in place instead of rebuilding it.
+  const open = document.getElementById('zs-result-card');
+  if (state === 'progress' && open && open.dataset.requestId === requestId && open.dataset.state === 'progress') {
+    updateImageProgress(open, opts);
+    return;
+  }
+
+  if (state === 'progress') {
+    const card = imageCardShell(requestId, 'blue');
+    card.dataset.state = 'progress';
+    card.append(
+      el('div', { class: 'zs-loading' }, [
+        el('div', { class: 'zs-spinner', 'aria-hidden': 'true' }),
+        el('div', { style: 'flex: 1; min-width: 0' }, [
+          el('div', { class: 'zs-title', 'data-role': 'title' }),
+          el('div', { class: 'zs-muted', 'data-role': 'detail' })
+        ])
+      ]),
+      el('div', { class: 'zs-meter', 'data-role': 'meter', role: 'progressbar', 'aria-label': 'Model download', 'aria-valuemin': '0', 'aria-valuemax': '100', hidden: true }, [el('span', { style: 'width: 0%' })])
+    );
+    document.body.appendChild(card);
+    updateImageProgress(card, opts);
+    return;
+  }
+
+  if (state === 'error') {
+    if (requestId && dismissedImageChecks.has(requestId)) {
+      zsToast(errorText(opts).title, { tone: 'red' });
+      return;
+    }
+    const card = imageCardShell(requestId, 'red');
+    card.dataset.state = 'error';
+    const { title, body } = errorText(opts);
+    card.append(
+      el('p', { class: 'zs-title', text: title }),
+      el('p', { class: 'zs-muted', style: 'margin: 6px 0 0', text: body })
+    );
+    document.body.appendChild(card);
+  }
+}
+
+function errorText({ code, message }) {
+  if (code === 'no-webgpu') {
+    return { title: 'This browser can’t run the image model', body: 'The image check needs WebGPU, which isn’t available here. Recent Chrome and Brave support it on most computers.' };
+  }
+  if (code === 'no-image') {
+    return { title: 'No photo or video in this post', body: 'Right-click anywhere on a post that has a photo or video, then choose ZeroSlop → Check this post’s image or video.' };
+  }
+  if (code === 'image-fetch') {
+    return { title: 'Couldn’t load that image', body: 'X may have removed it, or the connection dropped. Try again in a moment.' };
+  }
+  return { title: 'The image check didn’t work', body: message || 'Please try again.' };
+}
+
+function updateImageProgress(card, { stage = 'starting', progress, loaded, total, mode }) {
+  const texts = mode === 'detect' ? DETECT_STAGE_TEXT : IMAGE_STAGE_TEXT;
+  const [title, detail] = texts[stage] || texts.starting;
+  card.querySelector('[data-role="title"]').textContent = title;
+  const meter = card.querySelector('[data-role="meter"]');
+  const showBar = (stage === 'downloading' || stage === 'loading') && typeof progress === 'number';
+  meter.hidden = !showBar;
+  let detailText = detail;
+  if (showBar) {
+    const pct = Math.max(0, Math.min(100, Math.round(progress)));
+    meter.firstChild.style.width = `${pct}%`;
+    meter.setAttribute('aria-valuenow', String(pct));
+    if (stage === 'downloading' && total) {
+      detailText = `${pct}% · ${sizeText(loaded)} of ${sizeText(total)}. You can keep browsing.`;
+    } else {
+      detailText = `${pct}%`;
+    }
+  }
+  card.querySelector('[data-role="detail"]').textContent = detailText;
+}
+
+function showExplainResult({ requestId, tweetId, url, result }) {
+  const base = IMAGE_VERDICTS[result?.verdict] || IMAGE_VERDICTS.unclear;
+  const mediaLabel = mediaLabels.get(url) || 'image';
+  const isVideo = mediaLabel.startsWith('video');
+  // Say "video" when we checked a video's preview frame.
+  const verdict = isVideo
+    ? { ...base, label: base.label.replace('image', 'video').replace('Image', 'Video'), title: base.title.replace('image', 'video') }
+    : base;
+  const checkedWhat = isVideo
+    ? `Checked the preview frame of ${mediaLabel === 'video' ? 'the video' : mediaLabel}.`
+    : `Checked ${mediaLabel === 'image' ? 'the image' : mediaLabel}.`;
+  const signs = result?.signs || [];
+  const confidence = result?.confidence || 0;
+
+  // A visible AI watermark is strong evidence, so it replaces the detector's label on the post.
+  const container = tweetId ? getTweetContainerByTweetId(tweetId) : null;
+  if (container && result?.watermark) {
+    setBadge(container, {
+      kind: 'image-watermark',
+      priority: 27,
+      replace: true,
+      tone: 'red',
+      label: 'AI watermark',
+      title: `AI watermark spotted: ${result.watermark}`,
+      desc: `${checkedWhat} ${signs.length ? `Signs: ${signs.join('; ')}.` : ''}`.trim(),
+      meta: 'Spotted by Gemma 4 on this device. It can be wrong.'
+    });
+  }
+  const detectorScore = zsImageCache[mediaIdFromUrl(url)]?.score;
+
+  const render = () => {
+    const card = imageCardShell(requestId, result?.watermark ? 'red' : verdict.tone);
+    card.dataset.state = 'result';
+    card.append(...[
+      el('div', { class: 'zs-eyebrow', style: 'margin-bottom: 4px', text: 'Gemma 4’s explanation' }),
+      el('div', { class: 'zs-score' }, [el('span', { class: 'zs-score-label', style: 'font-size: 20px; color: var(--zs-tone)', text: verdict.title })]),
+      el('div', { class: 'zs-muted', style: 'margin-top: 4px', text: `${checkedWhat} ${confidence ? `Model confidence: ${confidence}%.` : ''}`.trim() }),
+      typeof detectorScore === 'number' ? el('div', { class: 'zs-muted', style: 'margin-top: 2px', text: `The detector scored it ${detectorScore}% likely AI.` }) : null,
+      result?.watermark ? el('div', { class: 'zs-flag zs-tone-red' }, [`Watermark spotted: ${result.watermark}`]) : null,
+      result?.bait ? el('div', { class: 'zs-flag zs-tone-amber' }, ['Looks like engagement bait']) : null,
+      signs.length ? el('ul', { class: 'zs-signs', 'aria-label': 'Signs the model noticed' }, signs.map((sign) => el('li', { text: sign }))) : null,
+      el('p', { class: 'zs-note', text: 'Checked by Gemma 4 on your computer. Nothing was uploaded. The model can be wrong, especially with realistic photos.' })
+    ].filter(Boolean));
+    document.body.appendChild(card);
+  };
+
+  if (requestId && dismissedImageChecks.has(requestId)) {
+    zsToast(`Explanation ready: ${verdict.title.toLowerCase()}.`, {
+      tone: result?.watermark ? 'red' : verdict.tone,
+      actions: [{ label: 'Show result', onClick: render }]
+    });
+    return;
+  }
+  render();
+}
+
+
+/** Registry ID for an image on X's CDN: its path, e.g. /media/ABC123 -> "media_ABC123". */
+function mediaIdFromUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== 'pbs.twimg.com') return null;
+    const id = u.pathname.replace(/^\/+/, '').replace(/\.(jpg|jpeg|png|webp)$/i, '').replace(/[^A-Za-z0-9_.-]+/g, '_');
+    return id.length >= 3 && id.length <= 300 ? id : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/** The frame a playing (or paused) video is showing, as a JPEG, so a video gets more than its preview image checked. */
+function captureVideoFrame(video) {
+  try {
+    if (!video || video.readyState < 2 || !video.videoWidth) return null;
+    const scale = Math.min(1, 768 / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.9);
+  } catch (e) {
+    return null; // The browser may refuse to read the frame; the preview image is still checked.
+  }
+}
+
+function detectTone(score) {
+  if (score >= 70) return 'red';
+  if (score >= 50) return 'amber';
+  return 'green';
+}
+
+function detectVerdict(score) {
+  if (score >= 70) return 'Likely AI-generated';
+  if (score >= 50) return 'Possibly AI-generated';
+  if (score >= 30) return 'Hard to tell';
+  return 'Likely real';
+}
+
+const IMAGE_REGISTRY_MIN_SCORE = 50; // Automatic labels from the registry only for likely-AI media.
+
+function imageBadgeSpec({ score, kind = 'image', source, checks = 1, avg, mediaId }) {
+  const what = kind === 'video' ? 'video' : 'image';
+  return {
+    kind: 'image',
+    priority: 25,
+    replace: true,
+    tone: detectTone(score),
+    label: `${score}% AI ${what}`,
+    title: `${what === 'video' ? 'Video' : 'Image'}: ${detectVerdict(score).toLowerCase()} (${score}%)`,
+    desc: source === 'local'
+      ? `You checked this ${what} on your computer with the Community Forensics detector.`
+      : `Checked ${checks} ${checks === 1 ? 'time' : 'times'} by the community, averaging ${avg ?? score}%.`,
+    meta: 'Detectors can be wrong, especially with screenshots and heavily compressed images.',
+    actions: () => voteActions(`img:${mediaId}`, (voteType) => chrome.runtime.sendMessage({ action: 'voteImage', mediaId, voteType }))
+  };
+}
+
+/** Label a post from this computer's earlier checks, or from the community registry. */
+function applyStoredImageResults(article) {
+  if (!article) return;
+  const items = collectPostMedia(article)
+    .map((m) => ({ ...m, id: mediaIdFromUrl(m.url) }))
+    .filter((m) => m.id);
+  if (!items.length) return;
+
+  let best = null;
+  for (const m of items) {
+    const saved = zsImageCache[m.id];
+    if (saved && (!best || saved.score > best.score)) best = { ...saved, mediaId: m.id };
+  }
+  if (best) {
+    setBadge(article, imageBadgeSpec({ ...best, source: 'local' }));
+    return;
+  }
+
+  if (zsSettings.communityShield === false) return;
+  chrome.runtime.sendMessage({ action: 'checkImageRegistry', mediaIds: items.map((m) => m.id) }, (entries) => {
+    if (chrome.runtime.lastError || !entries) return;
+    let top = null;
+    for (const [id, entry] of Object.entries(entries)) {
+      if (entry.downvotes > entry.upvotes + 2) continue; // The community disagrees with this score.
+      if (!top || entry.avg > top.avg) top = { ...entry, mediaId: id };
+    }
+    if (top && top.avg >= IMAGE_REGISTRY_MIN_SCORE) {
+      setBadge(article, imageBadgeSpec({ score: top.avg, kind: top.kind, source: 'registry', checks: top.checks, avg: top.avg, mediaId: top.mediaId }));
+    }
+  });
+}
+
+function showDetectResult({ requestId, tweetId, url, mediaId, kind, result, community }) {
+  const score = result?.score ?? 0;
+  const isVideo = kind === 'video';
+  const mediaLabel = mediaLabels.get(url) || kind || 'image';
+  const what = isVideo ? 'video' : 'image';
+  const checkedWhat = isVideo
+    ? `Checked ${mediaLabel === 'video' ? 'the video' : mediaLabel}: ${result?.framesChecked > 1 ? `preview and ${result.framesChecked - 1} frame${result.framesChecked > 2 ? 's' : ''}, averaged` : 'preview image'}.`
+    : `Checked ${mediaLabel === 'image' ? 'the image' : mediaLabel}.`;
+
+  const container = tweetId ? getTweetContainerByTweetId(tweetId) : null;
+  if (container) setBadge(container, imageBadgeSpec({ score, kind, source: 'local', mediaId }));
+
+  const render = () => {
+    const card = imageCardShell(requestId, detectTone(score));
+    card.dataset.state = 'result';
+
+    const voteRow = el('div', { class: 'zs-row', style: 'align-items: center; margin-top: 12px' });
+    const voteKey = `img:${mediaId}`;
+    const showVoted = (type) => voteRow.replaceChildren(el('div', { class: 'zs-muted', role: 'status', text: type === 'up' ? '✓ Thanks, you said this looks right.' : '✓ Thanks, you said this looks wrong.' }));
+    if (zsVotes.get(voteKey)) {
+      showVoted(zsVotes.get(voteKey));
+    } else {
+      const vote = (type) => () => {
+        zsVotes.set(voteKey, type);
+        chrome.runtime.sendMessage({ action: 'voteImage', mediaId, voteType: type });
+        showVoted(type);
+      };
+      voteRow.append(
+        el('span', { class: 'zs-muted', style: 'flex: none', text: 'Is this right?' }),
+        el('button', { type: 'button', class: 'zs-btn zs-btn-secondary', onclick: vote('up') }, '👍 Yes'),
+        el('button', { type: 'button', class: 'zs-btn zs-btn-secondary', onclick: vote('down') }, '👎 No')
+      );
+    }
+
+    const explain = el('button', { type: 'button', class: 'zs-btn zs-btn-ghost', style: 'margin-top: 6px; align-self: flex-start' }, 'Explain why with Gemma 4');
+    chrome.storage.local.get(['imageModelReady'], ({ imageModelReady }) => {
+      if (!imageModelReady) explain.textContent = 'Explain why with Gemma 4 (3.4 GB download)';
+    });
+    explain.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ action: 'explainImage', url, tweetId, mediaId });
+      showImageCard({ state: 'progress', requestId: `explain-${requestId}`, stage: 'starting' });
+    });
+
+    const communityText = community && community.checks > 1
+      ? `Checked ${community.checks} times by the community, averaging ${community.avg}%.`
+      : 'First check of this ' + what + ' in the community registry.';
+
+    card.append(...[
+      el('div', { class: 'zs-score' }, [
+        el('span', { class: 'zs-score-num', text: `${score}%` }),
+        el('span', { class: 'zs-score-label', text: detectVerdict(score) })
+      ]),
+      el('div', { class: 'zs-meter', role: 'meter', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(score), 'aria-label': `Likelihood the ${what} is AI-generated` }, [
+        el('span', { style: `width: ${Math.max(2, Math.min(100, score))}%` })
+      ]),
+      el('div', { class: 'zs-muted', text: checkedWhat }),
+      el('div', { class: 'zs-muted', style: 'margin-top: 2px', text: communityText }),
+      voteRow,
+      el('div', { style: 'display: flex' }, [explain]),
+      el('p', { class: 'zs-note', text: 'Scored on your computer by the Community Forensics detector. The image stayed on your computer; only the score was shared with the community registry. Detectors can be wrong, especially with screenshots and heavily compressed images.' })
+    ]);
+    document.body.appendChild(card);
+  };
+
+  if (requestId && dismissedImageChecks.has(requestId)) {
+    zsToast(`Image check finished: ${score}% likely AI.`, { tone: detectTone(score), actions: [{ label: 'Show result', onClick: render }] });
+    return;
+  }
+  render();
 }
 
 // ---------------------------------------------------------------------------
