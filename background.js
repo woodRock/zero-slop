@@ -393,13 +393,18 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
     }
 
     // Prepare metadata
+    const shield = shieldType === 'shield-red' ? 'red' : shieldType === 'shield-blue' ? 'blue' : shieldType === 'shield-green' ? 'green' : 'none';
     const fields = {
       handle: { stringValue: author.handle },
       name: { stringValue: author.name || "" },
       pfp: { stringValue: author.pfp || "" },
-      shield_type: { stringValue: shieldType === 'shield-red' ? 'red' : shieldType === 'shield-blue' ? 'blue' : shieldType === 'shield-green' ? 'green' : 'none' },
       last_reported: { timestampValue: new Date().toISOString() }
     };
+    // A report that leaves the account unlabelled ("none") must not replace a label
+    // someone else already gave it. Only new accounts get "none" written.
+    if (shield !== 'none' || !getResponse.ok) {
+      fields.shield_type = { stringValue: shield };
+    }
 
     // Prepare commit body for BOTH metadata update AND atomic increment
     const body = {
@@ -408,7 +413,10 @@ async function storeSlopFactoryReport(author, shieldType = 'shield-red') {
           update: {
             name: `projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents/slop_accounts/${accountId}`,
             fields: fields
-          }
+          },
+          // Without a mask, Firestore replaces the whole document, wiping votes and
+          // resetting manual_reports. The mask limits the write to these fields.
+          updateMask: { fieldPaths: Object.keys(fields) }
         },
         {
           transform: {
